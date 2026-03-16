@@ -1,0 +1,29 @@
+{
+  "name": "@eloquentjs/graphql",
+  "version": "0.0.1",
+  "description": "Auto-generated GraphQL schema and resolvers from EloquentJS models",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "dependencies": {
+    "@eloquentjs/core": "^1.0.0"
+  },
+  "peerDependencies": {
+    "graphql": "^16.0.0"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Anand Pilania",
+    "email": "pilaniaanand@gmail.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Anand-Pilania/eloquentjs.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Anand-Pilania/eloquentjs/issues"
+  },
+  "homepage": "https://github.com/Anand-Pilania/eloquentjs#readme"
+}

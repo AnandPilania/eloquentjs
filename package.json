@@ -1,0 +1,53 @@
+{
+    "name": "eloquentjs",
+    "version": "0.0.1",
+    "description": "EloquentJS monorepo — Laravel Eloquent for Node.js",
+    "author": {
+        "name": "Anand Pilania",
+        "email": "pilaniaanand@gmail.com"
+    },
+    "license": "MIT",
+    "homepage": "https://github.com/Anand-Pilania/eloquentjs#readme",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/Anand-Pilania/eloquentjs.git"
+    },
+    "bugs": {
+        "url": "https://github.com/Anand-Pilania/eloquentjs/issues"
+    },
+    "keywords": [
+        "eloquent",
+        "laravel",
+        "orm",
+        "database",
+        "typescript",
+        "node.js",
+        "active-record",
+        "query-builder"
+    ],
+    "workspaces": [
+        "packages/*"
+    ],
+    "scripts": {
+        "build": "echo 'ESM — no build step needed'",
+        "changeset": "changeset",
+        "publish:canary": "changeset version --snapshot canary && changeset publish --tag canary",
+        "release:dry-run": "npm run test && changeset version && npm run sync && changeset publish --dry-run",
+        "release": "npm run test && npm run version-packages && changeset publish",
+        "sync": "node scripts/sync-metadata.js",
+        "test": "cross-env NODE_OPTIONS=--experimental-vm-modules jest --runInBand --forceExit",
+        "test:unit": "cross-env NODE_OPTIONS=--experimental-vm-modules jest tests/unit --runInBand --forceExit",
+        "test:coverage": "cross-env NODE_OPTIONS=--experimental-vm-modules jest --coverage --runInBand --forceExit",
+        "version-packages": "changeset version && npm run sync && npm install",
+        "clean": "npm run clean:workspaces && rm -rf node_modules",
+        "clean:workspaces": "npm exec --workspaces -- rm -rf node_modules dist"
+    },
+    "devDependencies": {
+        "@changesets/cli": "^2.27.1",
+        "@faker-js/faker": "^8.4.1",
+        "cross-env": "^10.1.0",
+        "glob": "^10.5.0",
+        "jest": "^29.7.0"
+    },
+    "type": "module"
+}

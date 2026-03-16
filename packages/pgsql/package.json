@@ -1,0 +1,27 @@
+{
+  "name": "@eloquentjs/pgsql",
+  "version": "0.0.1",
+  "description": "PostgreSQL driver for EloquentJS",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "dependencies": {
+    "@eloquentjs/core": "^1.0.0",
+    "pg": "^8.11.0"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Anand Pilania",
+    "email": "pilaniaanand@gmail.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Anand-Pilania/eloquentjs.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Anand-Pilania/eloquentjs/issues"
+  },
+  "homepage": "https://github.com/Anand-Pilania/eloquentjs#readme"
+}

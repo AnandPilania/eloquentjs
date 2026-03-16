@@ -1,0 +1,45 @@
+.github/
+
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Testing
+coverage/
+*.lcov
+*.log
+
+# Build/Output
+dist/
+lib/
+build/
+*.tsbuildinfo
+
+# Environment / Secrets
+.env
+.env.local
+.env.*.local
+*.pem
+
+# Debug logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# Changesets
+# Note: Do NOT ignore the .changeset folder itself.
+# Only ignore the "pre" state file if you use prerelease mode.
+.changeset/pre.json
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo

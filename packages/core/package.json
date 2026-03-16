@@ -1,0 +1,29 @@
+{
+  "name": "@eloquentjs/core",
+  "version": "0.0.1",
+  "description": "Zero-dependency core ORM engine for EloquentJS",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "keywords": [
+    "orm",
+    "eloquent",
+    "nodejs",
+    "query-builder"
+  ],
+  "license": "MIT",
+  "author": {
+    "name": "Anand Pilania",
+    "email": "pilaniaanand@gmail.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Anand-Pilania/eloquentjs.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Anand-Pilania/eloquentjs/issues"
+  },
+  "homepage": "https://github.com/Anand-Pilania/eloquentjs#readme"
+}
