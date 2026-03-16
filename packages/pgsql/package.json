@@ -8,7 +8,7 @@
     ".": "./src/index.js"
   },
   "dependencies": {
-    "@eloquentjs/core": "^1.0.0",
+    "@eloquentjs/core": "^0.0.1",
     "pg": "^8.11.0"
   },
   "license": "MIT",
