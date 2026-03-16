@@ -1,6 +1,6 @@
 {
   "name": "@eloquentjs/mongodb",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "MongoDB driver for EloquentJS",
   "type": "module",
   "main": "src/index.js",
@@ -8,7 +8,7 @@
     ".": "./src/index.js"
   },
   "dependencies": {
-    "@eloquentjs/core": "^0.0.1",
+    "@eloquentjs/core": "^0.0.2",
     "mongodb": "^6.5.0"
   },
   "license": "MIT",
@@ -18,10 +18,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Anand-Pilania/eloquentjs.git"
+    "url": "git+https://github.com/AnandPilania/eloquentjs.git"
   },
   "bugs": {
-    "url": "https://github.com/Anand-Pilania/eloquentjs/issues"
+    "url": "https://github.com/AnandPilania/eloquentjs/issues"
   },
-  "homepage": "https://github.com/Anand-Pilania/eloquentjs#readme"
+  "homepage": "https://github.com/AnandPilania/eloquentjs#readme"
 }
