@@ -1,0 +1,118 @@
+# EloquentJS — Windsurf Rules
+
+## Stack
+Node.js ESM + EloquentJS ORM + PostgreSQL/MongoDB + Express/Fastify
+
+## Packages
+- `@eloquentjs/core` — Model, QueryBuilder, Relations, Events, Casts
+- `@eloquentjs/validator` — Validation (fluent schema + async DB rules)
+- `@eloquentjs/pgsql` — PostgreSQL driver with pool management
+- `@eloquentjs/graphql` — Auto GraphQL from models
+- `@eloquentjs/api` — Auto REST CRUD routes
+- `@eloquentjs/realtime` — WebSocket broadcasting
+- `@eloquentjs/cli` — Scaffold and migration commands
+
+## Critical Rules
+
+### 1. Always await DB calls
+```js
+// Every Model method returns a Promise
+const user = await User.findOrFail(id)      // ✅
+const user = User.findOrFail(id)            // ❌ Promise, not User
+```
+
+### 2. Eager load relations
+```js
+// ✅ One query per relation
+const posts = await Post.with('user', 'tags', 'comments').get()
+
+// ❌ N+1: one extra query per post
+const posts = await Post.all()
+for (const p of posts) { const u = await p.user() }
+```
+
+### 3. Declare fillable
+```js
+// ✅ Required for create/update to work
+class User extends Model {
+  static fillable = ['name', 'email', 'password']
+}
+
+// ❌ Empty fillable = nothing gets saved
+class User extends Model {}
+```
+
+### 4. Validate before write
+```js
+import { v } from '@eloquentjs/validator'
+
+const schema = v.schema({
+  email: v.string().email(),
+  name:  v.string().min(2),
+})
+const data = schema.parse(req.body)       // throws on invalid
+await User.create(data)
+```
+
+### 5. Use findOrFail for required records
+```js
+// ✅ Throws ModelNotFoundException → handle as 404
+const user = await User.findOrFail(req.params.id)
+
+// ❌ Need manual null check
+const user = await User.find(req.params.id)
+if (!user) return res.status(404).json({ error: 'Not found' })
+```
+
+## Model Template
+
+```js
+import { Model } from '@eloquentjs/core'
+
+export default class ModelName extends Model {
+  static table       = 'table_name'
+  static fillable    = ['field1', 'field2']
+  static hidden      = []
+  static softDeletes = false
+  static casts = {
+    // field: 'boolean' | 'integer' | 'decimal:2' | 'json' | 'array' | 'date' | 'datetime'
+  }
+
+  // Relations
+  // parent()   { return this.belongsTo(Parent) }
+  // children() { return this.hasMany(Child) }
+
+  // Scopes
+  // static scopeName(qb) { return qb.where(...) }
+
+  // Hooks
+  // static async creating(record) { }
+  // static async created(record)  { }
+}
+```
+
+## REST Endpoint Template
+
+```js
+import { apiRouter, resource } from '@eloquentjs/api'
+
+app.use('/api', apiRouter([
+  resource(ModelName, {
+    middleware:  [authMiddleware],
+    with:        ['relation1'],
+    searchable:  ['field1', 'field2'],
+    sortable:    ['created_at'],
+    policy:      async (req, model, action) => true,
+  }),
+]))
+```
+
+## CLI Commands
+
+```bash
+eloquent make:model Name --all      # scaffold everything
+eloquent migrate                    # run pending migrations
+eloquent migrate:fresh --seed       # dev reset
+eloquent generate:graphql           # generate schema.graphql
+eloquent generate:types             # generate .d.ts types
+```

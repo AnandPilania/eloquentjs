@@ -1,27 +1,28 @@
 {
-  "name": "@eloquentjs/realtime",
-  "version": "0.0.2",
-  "description": "Real-time WebSocket subscriptions for EloquentJS models",
-  "type": "module",
-  "main": "src/index.js",
-  "exports": {
-    ".": "./src/index.js"
-  },
-  "dependencies": {
-    "@eloquentjs/core": "^0.0.2",
-    "ws": "^8.17.0"
-  },
-  "license": "MIT",
-  "author": {
-    "name": "Anand Pilania",
-    "email": "pilaniaanand@gmail.com"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/AnandPilania/eloquentjs.git"
-  },
-  "bugs": {
-    "url": "https://github.com/AnandPilania/eloquentjs/issues"
-  },
-  "homepage": "https://github.com/AnandPilania/eloquentjs#readme"
+    "name": "@eloquentjs/realtime",
+    "version": "0.0.2",
+    "description": "Real-time WebSocket subscriptions for EloquentJS models",
+    "type": "module",
+    "main": "src/index.js",
+    "exports": {
+        ".": "./src/index.js",
+        "./client": "./src/index.js"
+    },
+    "dependencies": {
+        "@eloquentjs/core": "^0.0.2",
+        "ws": "^8.19.0"
+    },
+    "license": "MIT",
+    "author": {
+        "name": "Anand Pilania",
+        "email": "pilaniaanand@gmail.com"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/AnandPilania/eloquentjs.git"
+    },
+    "bugs": {
+        "url": "https://github.com/AnandPilania/eloquentjs/issues"
+    },
+    "homepage": "https://github.com/AnandPilania/eloquentjs#readme"
 }

@@ -1,0 +1,166 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'           # v1.0.0, v1.1.0-alpha.0, v2.0.0-beta.1, etc.
+
+permissions:
+  contents: write      # to create GitHub releases
+  id-token: write      # for npm provenance
+
+jobs:
+  # ────────────────────────────────────────────────────────────────────────────
+  validate:
+    name: Validate release
+    runs-on: ubuntu-latest
+
+    outputs:
+      version:    ${{ steps.meta.outputs.version }}
+      dist_tag:   ${{ steps.meta.outputs.dist_tag }}
+      is_prerel:  ${{ steps.meta.outputs.is_prerel }}
+      changelog:  ${{ steps.meta.outputs.changelog }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # full history for changelog
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Run full test suite
+        run: node --experimental-vm-modules node_modules/.bin/jest tests/unit/ --no-coverage --ci
+
+      - name: Extract release metadata
+        id: meta
+        run: |
+          TAG="${GITHUB_REF_NAME}"                       # v1.2.3
+          VERSION="${TAG#v}"                             # 1.2.3
+
+          # Determine dist-tag
+          if [[ "$VERSION" == *"-alpha."* ]]; then
+            DIST_TAG="alpha"
+            IS_PREREL="true"
+          elif [[ "$VERSION" == *"-beta."* ]]; then
+            DIST_TAG="beta"
+            IS_PREREL="true"
+          elif [[ "$VERSION" == *"-rc."* ]]; then
+            DIST_TAG="rc"
+            IS_PREREL="true"
+          elif [[ "$VERSION" == *"-next."* ]]; then
+            DIST_TAG="next"
+            IS_PREREL="true"
+          else
+            DIST_TAG="latest"
+            IS_PREREL="false"
+          fi
+
+          echo "version=$VERSION"       >> $GITHUB_OUTPUT
+          echo "dist_tag=$DIST_TAG"     >> $GITHUB_OUTPUT
+          echo "is_prerel=$IS_PREREL"   >> $GITHUB_OUTPUT
+
+          # Extract changelog section for this version
+          CHANGELOG=$(node -e "
+            const fs = require('fs')
+            const log = fs.existsSync('CHANGELOG.md')
+              ? fs.readFileSync('CHANGELOG.md', 'utf8')
+              : ''
+            const start = log.indexOf('## [$VERSION]'.replace('\$VERSION', '$VERSION'))
+            if (start === -1) { console.log('No changelog entry found.'); process.exit(0) }
+            const end = log.indexOf('\n## [', start + 1)
+            const section = end === -1 ? log.slice(start) : log.slice(start, end)
+            console.log(section.trim())
+          " 2>/dev/null || echo "Release $VERSION")
+
+          # Store multi-line output
+          {
+            echo "changelog<<EOF"
+            echo "$CHANGELOG"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+
+      - name: Verify package version matches tag
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          TAG_VERSION="${{ steps.meta.outputs.version }}"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "❌ package.json version ($PKG_VERSION) does not match tag ($TAG_VERSION)"
+            exit 1
+          fi
+          echo "✔ Version match: $PKG_VERSION"
+
+  # ────────────────────────────────────────────────────────────────────────────
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    needs: validate
+    environment:
+      name: ${{ needs.validate.outputs.is_prerel == 'true' && 'prerelease' || 'production' }}
+      url: https://www.npmjs.com/package/@eloquentjs/core
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Publish all packages
+        run: node scripts/publish.js --tag=${{ needs.validate.outputs.dist_tag }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Verify published versions
+        run: |
+          VERSION="${{ needs.validate.outputs.version }}"
+          TAG="${{ needs.validate.outputs.dist_tag }}"
+          PACKAGES=(core pgsql mongodb realtime graphql api cli)
+          for pkg in "${PACKAGES[@]}"; do
+            echo -n "Checking @eloquentjs/$pkg@$VERSION ... "
+            npm view "@eloquentjs/$pkg@$VERSION" version 2>/dev/null && echo "✔" || echo "⚠ not found yet (may take a moment)"
+          done
+
+  # ────────────────────────────────────────────────────────────────────────────
+  github-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [validate, publish]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "v${{ needs.validate.outputs.version }}"
+          body: ${{ needs.validate.outputs.changelog }}
+          prerelease: ${{ needs.validate.outputs.is_prerel == 'true' }}
+          generate_release_notes: false
+          files: |
+            CHANGELOG.md
+
+  # ────────────────────────────────────────────────────────────────────────────
+  notify:
+    name: Post-release notifications
+    runs-on: ubuntu-latest
+    needs: [validate, publish, github-release]
+    if: always() && needs.validate.outputs.is_prerel == 'false'
+
+    steps:
+      - name: Announce stable release
+        if: needs.publish.result == 'success'
+        run: |
+          echo "🎉 EloquentJS v${{ needs.validate.outputs.version }} published!"
+          echo "npm: https://www.npmjs.com/package/@eloquentjs/core/v/${{ needs.validate.outputs.version }}"
+          echo "GitHub: https://github.com/${{ github.repository }}/releases/tag/v${{ needs.validate.outputs.version }}"
+          # Add Slack/Discord webhook call here if desired:
+          # curl -X POST ${{ secrets.SLACK_WEBHOOK }} -d '{"text": "..."}'

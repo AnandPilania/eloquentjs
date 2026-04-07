@@ -16,7 +16,16 @@ const { Pool, types } = pg
 types.setTypeParser(types.builtins.INT8,    v => parseInt(v, 10))
 types.setTypeParser(types.builtins.NUMERIC, v => parseFloat(v))
 
-let _pool = null
+// ─── Per-connection pool registry ─────────────────────────────────────────────
+// Keyed by connectionName so multiple named connections each get their own pool.
+// This fixes the bug where calling connect() twice would overwrite _pool.
+const _pools = new Map()
+
+function _getPool(connectionName = 'default') {
+  const pool = _pools.get(connectionName)
+  if (!pool) throw new Error(`[EloquentJS/pgsql] No pool for connection "${connectionName}". Did you call connect()?`)
+  return pool
+}
 
 // ─── connect() ───────────────────────────────────────────────────────────────
 export async function connect(config = {}, connectionName = 'default') {
@@ -34,34 +43,55 @@ export async function connect(config = {}, connectionName = 'default') {
         ssl:                     config.ssl ?? false,
       }
 
-  _pool = new Pool(poolConfig)
+  // Close existing pool for this name before replacing it
+  if (_pools.has(connectionName)) {
+    await _pools.get(connectionName).end().catch(() => {})
+  }
 
-  // Verify connectivity
-  const client = await _pool.connect()
+  const pool = new Pool(poolConfig)
+
+  // Verify connectivity with a quick probe
+  const client = await pool.connect()
   try {
     await client.query('SELECT 1')
   } finally {
     client.release()
   }
 
-  const resolver = new PgResolver(_pool)
+  _pools.set(connectionName, pool)
+
+  const resolver = new PgResolver(pool)
   setResolver(resolver, connectionName)
   return resolver
 }
 
-export function getPool()       { return _pool }
-export async function disconnect() { await _pool?.end(); _pool = null }
+/** Returns the pg.Pool for the named connection (for advanced use). */
+export function getPool(connectionName = 'default') {
+  return _getPool(connectionName)
+}
+
+/** Disconnect and remove the named connection (or all if name omitted). */
+export async function disconnect(connectionName) {
+  if (connectionName) {
+    await _pools.get(connectionName)?.end().catch(() => {})
+    _pools.delete(connectionName)
+  } else {
+    // Disconnect all
+    await Promise.all([..._pools.values()].map(p => p.end().catch(() => {})))
+    _pools.clear()
+  }
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-/** Execute raw SQL outside of a model. */
-export async function raw(sql, params = []) {
-  const result = await _pool.query(sql, params)
+/** Execute raw SQL on the named connection. */
+export async function raw(sql, params = [], connectionName = 'default') {
+  const result = await _getPool(connectionName).query(sql, params)
   return result.rows
 }
 
 /** Run a function inside a BEGIN/COMMIT transaction. Rolls back on throw. */
-export async function transaction(callback) {
-  const client = await _pool.connect()
+export async function transaction(callback, connectionName = 'default') {
+  const client = await _getPool(connectionName).connect()
   try {
     await client.query('BEGIN')
     const result = await callback(new TransactionClient(client))

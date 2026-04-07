@@ -1,0 +1,126 @@
+# EloquentJS — Cursor Rules
+
+## Project Tech Stack
+- Runtime: Node.js (ESM, `"type": "module"`)
+- ORM: EloquentJS (`@eloquentjs/core`)
+- Database: PostgreSQL via `@eloquentjs/pgsql` (or MongoDB via `@eloquentjs/mongodb`)
+- Validation: `@eloquentjs/validator`
+- REST API: `@eloquentjs/api` (Express/Fastify)
+- GraphQL: `@eloquentjs/graphql`
+- Realtime: `@eloquentjs/realtime`
+
+## Code Style Rules
+
+### Imports
+- Always use ESM imports (`import`, not `require`)
+- Import from package names, not file paths for EloquentJS packages
+- Default export for Model classes; named exports for utilities
+
+```js
+// ✅ Correct
+import { Model } from '@eloquentjs/core'
+import { v }     from '@eloquentjs/validator'
+import User      from './models/User.js'
+
+// ❌ Wrong
+const { Model } = require('@eloquentjs/core')
+```
+
+### Model files
+- One model per file in `app/models/`
+- PascalCase filename matching class name
+- Always declare `static table`, `static fillable`, and `static casts`
+- Soft deletes: add `static softDeletes = true` (never delete rows in user-facing apps)
+
+```js
+// ✅ Standard model structure
+export default class Product extends Model {
+  static table    = 'products'
+  static fillable = ['name', 'price', 'sku', 'category_id']
+  static hidden   = []
+  static casts    = { price: 'decimal:2', in_stock: 'boolean', tags: 'array' }
+  static softDeletes = true
+
+  category() { return this.belongsTo(Category) }
+  static scopeInStock(qb) { return qb.where('in_stock', true) }
+}
+```
+
+### Querying
+- Always `await` query results
+- Use `.with()` for any relations accessed after fetching
+- Use `findOrFail()` when record absence should be an error
+- Use `paginate()` for list endpoints (never `.all()` without limit in production)
+
+```js
+// ✅
+const product = await Product.findOrFail(id)
+const page    = await Product.inStock().with('category').paginate(page, 20)
+
+// ❌
+const product = Product.find(id)     // missing await
+const all     = await Product.all()  // dangerous in production
+```
+
+### Validation
+- Always validate before `create()` or `update()`
+- Use `@eloquentjs/validator` fluent schema for complex validation
+- Use `schema.parseAsync()` when rules include `unique()` or `exists()`
+
+```js
+// ✅
+const schema  = v.schema({ name: v.string().min(2), price: v.number().min(0) })
+const payload = schema.parse(req.body)
+const product = await Product.create(payload)
+```
+
+### Migrations
+- Name migrations descriptively: `create_X_table`, `add_Y_to_X`, `drop_X_from_Y`
+- Always implement both `up()` and `down()`
+- Never delete migration files that have run in production
+
+### Error handling
+- `ModelNotFoundException` — thrown by `findOrFail()`, map to HTTP 404
+- `ValidationException` — thrown by `schema.parse()`, map to HTTP 422
+- Use try/catch at route boundaries, not inside model methods
+
+## When to Use Each Package
+
+| Task | Package |
+|---|---|
+| Database queries | `@eloquentjs/core` Model + QueryBuilder |
+| Schema changes | `eloquent make:migration` + `Schema` builder |
+| Validate user input | `@eloquentjs/validator` |
+| REST endpoints | `@eloquentjs/api` `resource()` |
+| GraphQL | `@eloquentjs/graphql` `buildSchema()` |
+| Live updates | `@eloquentjs/realtime` `createRealtimeServer()` |
+| Generate code | `eloquent make:model --all` or MCP tools |
+| TypeScript types | `eloquent generate:types` |
+| OpenAPI docs | `eloquent generate:openapi` |
+
+## MCP Tools (if running)
+
+Before writing code, call these tools:
+1. `list_models` — see existing models and their schema
+2. `describe_model User` — full field/relation details
+3. `get_help` topic=query-builder — review query API
+4. `get_examples` topic=pagination — copy-paste code
+5. `nlp_query` — generate QueryBuilder from description
+
+## File Structure
+
+```
+app/
+  models/
+    User.js
+    Post.js
+database/
+  migrations/
+    20240315_create_users_table.js
+  seeders/
+    DatabaseSeeder.js
+    UserSeeder.js
+  factories/
+    UserFactory.js
+eloquent.config.js
+```

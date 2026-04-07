@@ -1,0 +1,56 @@
+{
+    "name": "@eloquentjs/cli",
+    "version": "0.0.2",
+    "description": "CLI for EloquentJS — scaffold models, migrations, seeders and more",
+    "type": "module",
+    "main": "src/index.js",
+    "bin": {
+        "eloquent": "./bin/eloquent.js",
+        "ejs": "./bin/eloquent.js"
+    },
+    "exports": {
+        ".": "./src/index.js"
+    },
+    "files": [
+        "src",
+        "bin",
+        "README.md"
+    ],
+    "keywords": [
+        "orm",
+        "eloquent",
+        "cli",
+        "scaffold",
+        "migrations"
+    ],
+    "license": "MIT",
+    "dependencies": {
+        "chokidar": "^3.6.0",
+        "@eloquentjs/core": "^0.0.2",
+        "@eloquentjs/codegen": "^0.0.2"
+    },
+    "peerDependencies": {
+        "@eloquentjs/pgsql": "^0.0.2",
+        "@eloquentjs/mongodb": "^0.0.2"
+    },
+    "peerDependenciesMeta": {
+        "@eloquentjs/pgsql": {
+            "optional": true
+        },
+        "@eloquentjs/mongodb": {
+            "optional": true
+        }
+    },
+    "author": {
+        "name": "Anand Pilania",
+        "email": "pilaniaanand@gmail.com"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/AnandPilania/eloquentjs.git"
+    },
+    "bugs": {
+        "url": "https://github.com/AnandPilania/eloquentjs/issues"
+    },
+    "homepage": "https://github.com/AnandPilania/eloquentjs#readme"
+}

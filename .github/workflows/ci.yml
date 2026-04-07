@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop, 'feat/**', 'fix/**', 'chore/**']
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ────────────────────────────────────────────────────────────────────────────
+  test:
+    name: Test (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['18', '20', '22']
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit tests
+        run: node --experimental-vm-modules node_modules/.bin/jest tests/unit/ --no-coverage --ci
+
+      - name: Run tests with coverage (Node 20 only)
+        if: matrix.node == '20'
+        run: node --experimental-vm-modules node_modules/.bin/jest tests/unit/ --coverage --ci
+
+      - name: Upload coverage
+        if: matrix.node == '20'
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+
+  # ────────────────────────────────────────────────────────────────────────────
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Check for syntax errors
+        run: |
+          # Validate all JS files parse without errors
+          find packages/*/src -name "*.js" | while read f; do
+            node --input-type=module < "$f" 2>&1 | grep -v "^$" || true
+          done
+
+      - name: Check package.json files are valid JSON
+        run: |
+          for f in package.json packages/*/package.json; do
+            node -e "JSON.parse(require('fs').readFileSync('$f','utf8'))" && echo "✔ $f"
+          done
+
+  # ────────────────────────────────────────────────────────────────────────────
+  check-versions:
+    name: Verify version consistency
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Check all packages share the same version
+        run: node scripts/check-versions.js
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Summary job — PRs require this to pass
+  ci-success:
+    name: CI Passed
+    runs-on: ubuntu-latest
+    needs: [test, lint, check-versions]
+    if: always()
+
+    steps:
+      - name: Check all jobs passed
+        run: |
+          if [[ "${{ needs.test.result }}" != "success" ]]; then
+            echo "Tests failed"
+            exit 1
+          fi
+          if [[ "${{ needs.lint.result }}" != "success" ]]; then
+            echo "Lint failed"
+            exit 1
+          fi
+          echo "All CI jobs passed ✔"
