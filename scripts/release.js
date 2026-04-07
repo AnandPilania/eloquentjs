@@ -267,7 +267,7 @@ if (!noGit && !dryRun) {
 info('Running tests...')
 if (!dryRun) {
     try {
-        execSync('node --experimental-vm-modules node_modules/.bin/jest tests/unit/ --no-coverage --silent', {
+        execSync('node --experimental-vm-modules node_modules/jest/bin/jest.js tests/unit/ --no-coverage --silent', {
             cwd: ROOT, stdio: 'inherit'
         })
     } catch {
