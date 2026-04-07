@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.0.3] — 2026-04-07
+
+### 🐛 Bug Fixes
+
+- release script (`9c99f35`)
+
+### 🔧 Chores
+
+- revamp core (`7cc826b`)
+
+
+---
+
 All notable changes to EloquentJS are documented here.
 
 This project follows [Semantic Versioning](https://semver.org/) and

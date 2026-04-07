@@ -1,43 +1,43 @@
 {
-    "name": "@eloquentjs/mcp",
-    "version": "0.0.2",
-    "description": "Model Context Protocol server for EloquentJS — lets AI agents query models, run migrations, introspect schemas, and generate code",
-    "type": "module",
-    "main": "src/index.js",
-    "bin": {
-        "eloquent-mcp": "./bin/server.js"
-    },
-    "exports": {
-        ".": "./src/index.js",
-        "./server": "./src/server.js",
-        "./tools": "./src/tools/index.js"
-    },
-    "keywords": [
-        "mcp",
-        "ai",
-        "agents",
-        "orm",
-        "eloquent",
-        "claude",
-        "cursor",
-        "windsurf"
-    ],
-    "license": "MIT",
-    "dependencies": {
-        "@eloquentjs/core": "^0.0.2",
-        "@eloquentjs/codegen": "^0.0.2",
-        "@modelcontextprotocol/sdk": "^1.27.1"
-    },
-    "author": {
-        "name": "Anand Pilania",
-        "email": "pilaniaanand@gmail.com"
-    },
-    "repository": {
-        "type": "git",
-        "url": "git+https://github.com/AnandPilania/eloquentjs.git"
-    },
-    "bugs": {
-        "url": "https://github.com/AnandPilania/eloquentjs/issues"
-    },
-    "homepage": "https://github.com/AnandPilania/eloquentjs#readme"
+  "name": "@eloquentjs/mcp",
+  "version": "0.0.3",
+  "description": "Model Context Protocol server for EloquentJS — lets AI agents query models, run migrations, introspect schemas, and generate code",
+  "type": "module",
+  "main": "src/index.js",
+  "bin": {
+    "eloquent-mcp": "./bin/server.js"
+  },
+  "exports": {
+    ".": "./src/index.js",
+    "./server": "./src/server.js",
+    "./tools": "./src/tools/index.js"
+  },
+  "keywords": [
+    "mcp",
+    "ai",
+    "agents",
+    "orm",
+    "eloquent",
+    "claude",
+    "cursor",
+    "windsurf"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@eloquentjs/core": "^0.0.3",
+    "@eloquentjs/codegen": "^0.0.3",
+    "@modelcontextprotocol/sdk": "^1.27.1"
+  },
+  "author": {
+    "name": "Anand Pilania",
+    "email": "pilaniaanand@gmail.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AnandPilania/eloquentjs.git"
+  },
+  "bugs": {
+    "url": "https://github.com/AnandPilania/eloquentjs/issues"
+  },
+  "homepage": "https://github.com/AnandPilania/eloquentjs#readme"
 }

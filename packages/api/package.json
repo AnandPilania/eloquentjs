@@ -1,38 +1,38 @@
 {
-    "name": "@eloquentjs/api",
-    "version": "0.0.2",
-    "description": "One-line auto-CRUD REST routes for EloquentJS models",
-    "type": "module",
-    "main": "src/index.js",
-    "exports": {
-        ".": "./src/index.js"
+  "name": "@eloquentjs/api",
+  "version": "0.0.3",
+  "description": "One-line auto-CRUD REST routes for EloquentJS models",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "dependencies": {
+    "@eloquentjs/core": "^0.0.3"
+  },
+  "peerDependencies": {
+    "express": "^4.0.0 || ^5.0.0",
+    "fastify": "^4.0.0 || ^5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "express": {
+      "optional": true
     },
-    "dependencies": {
-        "@eloquentjs/core": "^0.0.2"
-    },
-    "peerDependencies": {
-        "express": "^4.0.0 || ^5.0.0",
-        "fastify": "^4.0.0 || ^5.0.0"
-    },
-    "peerDependenciesMeta": {
-        "express": {
-            "optional": true
-        },
-        "fastify": {
-            "optional": true
-        }
-    },
-    "license": "MIT",
-    "author": {
-        "name": "Anand Pilania",
-        "email": "pilaniaanand@gmail.com"
-    },
-    "repository": {
-        "type": "git",
-        "url": "git+https://github.com/AnandPilania/eloquentjs.git"
-    },
-    "bugs": {
-        "url": "https://github.com/AnandPilania/eloquentjs/issues"
-    },
-    "homepage": "https://github.com/AnandPilania/eloquentjs#readme"
+    "fastify": {
+      "optional": true
+    }
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Anand Pilania",
+    "email": "pilaniaanand@gmail.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AnandPilania/eloquentjs.git"
+  },
+  "bugs": {
+    "url": "https://github.com/AnandPilania/eloquentjs/issues"
+  },
+  "homepage": "https://github.com/AnandPilania/eloquentjs#readme"
 }

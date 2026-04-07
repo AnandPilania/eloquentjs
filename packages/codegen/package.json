@@ -1,37 +1,37 @@
 {
-    "name": "@eloquentjs/codegen",
-    "version": "0.0.2",
-    "description": "Shared code generation engine for EloquentJS — introspect models, render stubs, emit GraphQL SDL, TypeScript types, OpenAPI specs",
-    "type": "module",
-    "main": "src/index.js",
-    "exports": {
-        ".": "./src/index.js",
-        "./introspect": "./src/introspect.js",
-        "./templates": "./src/templates/index.js",
-        "./render": "./src/render.js"
-    },
-    "keywords": [
-        "orm",
-        "eloquent",
-        "codegen",
-        "graphql",
-        "typescript",
-        "openapi"
-    ],
-    "license": "MIT",
-    "dependencies": {
-        "@eloquentjs/core": "^0.0.2"
-    },
-    "author": {
-        "name": "Anand Pilania",
-        "email": "pilaniaanand@gmail.com"
-    },
-    "repository": {
-        "type": "git",
-        "url": "git+https://github.com/AnandPilania/eloquentjs.git"
-    },
-    "bugs": {
-        "url": "https://github.com/AnandPilania/eloquentjs/issues"
-    },
-    "homepage": "https://github.com/AnandPilania/eloquentjs#readme"
+  "name": "@eloquentjs/codegen",
+  "version": "0.0.3",
+  "description": "Shared code generation engine for EloquentJS — introspect models, render stubs, emit GraphQL SDL, TypeScript types, OpenAPI specs",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./introspect": "./src/introspect.js",
+    "./templates": "./src/templates/index.js",
+    "./render": "./src/render.js"
+  },
+  "keywords": [
+    "orm",
+    "eloquent",
+    "codegen",
+    "graphql",
+    "typescript",
+    "openapi"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@eloquentjs/core": "^0.0.3"
+  },
+  "author": {
+    "name": "Anand Pilania",
+    "email": "pilaniaanand@gmail.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AnandPilania/eloquentjs.git"
+  },
+  "bugs": {
+    "url": "https://github.com/AnandPilania/eloquentjs/issues"
+  },
+  "homepage": "https://github.com/AnandPilania/eloquentjs#readme"
 }

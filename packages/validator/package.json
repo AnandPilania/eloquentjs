@@ -1,48 +1,48 @@
 {
-    "name": "@eloquentjs/validator",
-    "version": "0.0.2",
-    "description": "Full-featured standalone validation for EloquentJS and any Node.js app — sync/async rules, nested fields, fluent schema API, ORM-integrated unique/exists, Express and Fastify adapters",
-    "type": "module",
-    "main": "src/index.js",
-    "exports": {
-        ".": "./src/index.js",
-        "./schema": "./src/Schema.js",
-        "./rule": "./src/Rule.js",
-        "./rules": "./src/rules/index.js",
-        "./adapters": "./src/adapters/index.js"
-    },
-    "keywords": [
-        "validation",
-        "validator",
-        "orm",
-        "eloquent",
-        "express",
-        "fastify",
-        "zod",
-        "yup"
-    ],
-    "license": "MIT",
-    "dependencies": {
-        "@eloquentjs/core": "^0.0.2"
-    },
-    "peerDependencies": {
-        "express": "^4.0.0 || ^5.0.0"
-    },
-    "peerDependenciesMeta": {
-        "express": {
-            "optional": true
-        }
-    },
-    "author": {
-        "name": "Anand Pilania",
-        "email": "pilaniaanand@gmail.com"
-    },
-    "repository": {
-        "type": "git",
-        "url": "git+https://github.com/AnandPilania/eloquentjs.git"
-    },
-    "bugs": {
-        "url": "https://github.com/AnandPilania/eloquentjs/issues"
-    },
-    "homepage": "https://github.com/AnandPilania/eloquentjs#readme"
+  "name": "@eloquentjs/validator",
+  "version": "0.0.3",
+  "description": "Full-featured standalone validation for EloquentJS and any Node.js app — sync/async rules, nested fields, fluent schema API, ORM-integrated unique/exists, Express and Fastify adapters",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./schema": "./src/Schema.js",
+    "./rule": "./src/Rule.js",
+    "./rules": "./src/rules/index.js",
+    "./adapters": "./src/adapters/index.js"
+  },
+  "keywords": [
+    "validation",
+    "validator",
+    "orm",
+    "eloquent",
+    "express",
+    "fastify",
+    "zod",
+    "yup"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@eloquentjs/core": "^0.0.3"
+  },
+  "peerDependencies": {
+    "express": "^4.0.0 || ^5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "express": {
+      "optional": true
+    }
+  },
+  "author": {
+    "name": "Anand Pilania",
+    "email": "pilaniaanand@gmail.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AnandPilania/eloquentjs.git"
+  },
+  "bugs": {
+    "url": "https://github.com/AnandPilania/eloquentjs/issues"
+  },
+  "homepage": "https://github.com/AnandPilania/eloquentjs#readme"
 }
