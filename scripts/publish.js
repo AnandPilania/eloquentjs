@@ -14,9 +14,11 @@
 
 import { execSync } from 'child_process'
 import { readFileSync } from 'fs'
-import { join } from 'path'
+import { fileURLToPath } from 'url'
+import { dirname, join } from 'path'
 
-const ROOT = new URL('..', import.meta.url).pathname.replace(/\/$/, '')
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const ROOT = join(__dirname, '..')
 
 // Publish order matters — packages that others depend on go first
 const PUBLISH_ORDER = [
