@@ -12,7 +12,7 @@ const users = await User
   .paginate(1, 20)
 ```
 
-[![Tests](https://img.shields.io/badge/tests-700%20passing-brightgreen)](#)
+[![Tests](https://img.shields.io/badge/tests-735%20passing-brightgreen)](#)
 [![License](https://img.shields.io/badge/license-MIT-blue)](#)
 [![Node](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen)](#)
 [![MCP](https://img.shields.io/badge/MCP-compatible-purple)](#)
@@ -27,6 +27,7 @@ const users = await User
 | [`@eloquentjs/codegen`](./packages/codegen) | ![npm](https://img.shields.io/npm/v/@eloquentjs/codegen) | Shared code generation — GraphQL SDL, TypeScript, OpenAPI, stubs |
 | [`@eloquentjs/validator`](./packages/validator) | ![npm](https://img.shields.io/npm/v/@eloquentjs/validator) | Full validation — async rules, fluent schema API, unique/exists, adapters |
 | [`@eloquentjs/pgsql`](./packages/pgsql) | ![npm](https://img.shields.io/npm/v/@eloquentjs/pgsql) | PostgreSQL driver (multi-connection, transactions) |
+| [`@eloquentjs/sqlite`](./packages/sqlite) | ![npm](https://img.shields.io/npm/v/@eloquentjs/sqlite) | SQLite driver (local files, in-memory databases, migrations) |
 | [`@eloquentjs/mongodb`](./packages/mongodb) | ![npm](https://img.shields.io/npm/v/@eloquentjs/mongodb) | MongoDB driver |
 | [`@eloquentjs/realtime`](./packages/realtime) | ![npm](https://img.shields.io/npm/v/@eloquentjs/realtime) | WebSocket pub/sub — Pusher-protocol, auto-broadcast |
 | [`@eloquentjs/graphql`](./packages/graphql) | ![npm](https://img.shields.io/npm/v/@eloquentjs/graphql) | Auto-generate GraphQL schema + resolvers |
@@ -40,6 +41,7 @@ const users = await User
 
 ```bash
 npm install @eloquentjs/core @eloquentjs/pgsql
+# Or: npm install @eloquentjs/core @eloquentjs/sqlite
 npm install -g @eloquentjs/cli
 
 # Initialize in your project

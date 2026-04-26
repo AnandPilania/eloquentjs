@@ -111,6 +111,10 @@ export class PgResolver {
     this.pool = pool
   }
 
+  async raw(sql, params = []) {
+    return this.pool.query(sql, params)
+  }
+
   // ── SELECT ──────────────────────────────────────────────────────────────────
   async select(table, ctx) {
     const { sql, params } = buildSelect(table, ctx)

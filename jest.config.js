@@ -4,6 +4,7 @@ export default {
   moduleNameMapper: {
     '^@eloquentjs/core$':              '<rootDir>/packages/core/src/index.js',
     '^@eloquentjs/pgsql$':             '<rootDir>/packages/pgsql/src/index.js',
+    '^@eloquentjs/sqlite$':            '<rootDir>/packages/sqlite/src/index.js',
     '^@eloquentjs/mongodb$':           '<rootDir>/packages/mongodb/src/index.js',
     '^@eloquentjs/realtime$':          '<rootDir>/packages/realtime/src/index.js',
     '^@eloquentjs/graphql$':           '<rootDir>/packages/graphql/src/index.js',

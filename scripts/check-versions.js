@@ -18,6 +18,7 @@ const PACKAGES = [
     'packages/codegen',
     'packages/validator',
     'packages/pgsql',
+    'packages/sqlite',
     'packages/mongodb',
     'packages/realtime',
     'packages/graphql',

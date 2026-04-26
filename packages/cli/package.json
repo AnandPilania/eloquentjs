@@ -31,10 +31,14 @@
   },
   "peerDependencies": {
     "@eloquentjs/pgsql": "^0.0.3",
+    "@eloquentjs/sqlite": "^0.0.3",
     "@eloquentjs/mongodb": "^0.0.3"
   },
   "peerDependenciesMeta": {
     "@eloquentjs/pgsql": {
+      "optional": true
+    },
+    "@eloquentjs/sqlite": {
       "optional": true
     },
     "@eloquentjs/mongodb": {

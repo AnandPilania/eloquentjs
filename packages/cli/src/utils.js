@@ -1,6 +1,5 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'fs'
-import { resolve, dirname, join, basename } from 'path'
-import { fileURLToPath } from 'url'
+import { resolve, dirname, join } from 'path'
 
 // ─── Terminal colors ───────────────────────────────────────────────────────
 export const colors = {
@@ -126,21 +125,36 @@ export function resolveConfig(ctx) {
   }
 }
 
+export function normalizeDriver(driver = 'pgsql') {
+  const name = String(driver).toLowerCase()
+  const aliases = {
+    postgres: 'pgsql',
+    postgresql: 'pgsql',
+    sqlite3: 'sqlite',
+    mongo: 'mongodb',
+  }
+
+  return aliases[name] ?? name
+}
+
 // ─── Load DB connection for migrate/seed commands ──────────────────────────
 export async function loadConnection(ctx) {
   const cfg = resolveConfig(ctx)
-  const driver = cfg.connection?.driver ?? 'pgsql'
+  const driver = normalizeDriver(cfg.connection?.driver)
 
   try {
-    if (driver === 'pgsql' || driver === 'postgres' || driver === 'postgresql') {
+    if (driver === 'pgsql') {
       const { connect } = await import('@eloquentjs/pgsql')
       return connect(cfg.connection)
-    } else if (driver === 'mongodb' || driver === 'mongo') {
+    } else if (driver === 'mongodb') {
       const { connect } = await import('@eloquentjs/mongodb')
       return connect(cfg.connection)
-    } else {
-      throw new Error(`Unsupported driver: ${driver}. Supported: pgsql, mongodb`)
+    } else if (driver === 'sqlite') {
+      const { connect } = await import('@eloquentjs/sqlite')
+      return connect(cfg.connection)
     }
+
+    throw new Error(`Unsupported driver: ${driver}. Supported: pgsql, sqlite, mongodb`)
   } catch (err) {
     if (err.code === 'ERR_MODULE_NOT_FOUND') {
       throw new Error(`Driver package @eloquentjs/${driver} is not installed. Run: npm install @eloquentjs/${driver}`)
