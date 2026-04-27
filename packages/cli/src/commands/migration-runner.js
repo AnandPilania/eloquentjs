@@ -5,24 +5,41 @@
  * Each migration file is run once and recorded with a batch number.
  * Rollbacks remove the last batch.
  *
- * NOTE: Advisory locks and raw SQL DDL require PostgreSQL. MongoDB is
- * schemaless — migrations are unsupported and will throw a clear error.
+ * NOTE: MongoDB is schemaless — migrations are unsupported and will throw a
+ * clear error. SQL drivers use a common migration table with driver-specific
+ * DDL where needed.
  */
 
-import { resolve, join } from 'path'
+import { resolve } from 'path'
 import { existsSync } from 'fs'
-import { colors, success, info, warn, error, scanMigrations, resolveConfig, loadConnection } from '../utils.js'
+import { success, info, warn, error, scanMigrations, resolveConfig, loadConnection, normalizeDriver } from '../utils.js'
 
 // ─── Driver guard ─────────────────────────────────────────────────────────
-function assertPgDriver(ctx) {
+function getDriver(ctx) {
     const cfg = resolveConfig(ctx)
-    const driver = (cfg.connection?.driver ?? 'pgsql').toLowerCase()
-    if (driver === 'mongodb' || driver === 'mongo') {
+    return normalizeDriver((cfg.connection?.driver ?? 'pgsql').toLowerCase())
+}
+
+function isSqlite(ctx) {
+    return getDriver(ctx) === 'sqlite'
+}
+
+function assertSqlDriver(ctx) {
+    const driver = getDriver(ctx)
+    if (driver === 'mongodb') {
         throw new Error(
-            '[EloquentJS] Migrations require a SQL database (PostgreSQL). ' +
+            '[EloquentJS] Migrations require a SQL database (PostgreSQL or SQLite). ' +
             'MongoDB is schemaless — manage collection schemas through your application code. ' +
-            'If you intended to connect to PostgreSQL, set driver: "pgsql" in your config.'
+            'If you intended to connect to SQL, set driver: "pgsql" or "sqlite" in your config.'
         )
+    }
+}
+
+async function openConnection(ctx) {
+    try {
+        return await loadConnection(ctx)
+    } catch (err) {
+        throw new Error(`Cannot connect to database: ${err.message}`)
     }
 }
 
@@ -30,19 +47,37 @@ function assertPgDriver(ctx) {
 // Lock key: a stable integer derived from the string 'eloquentjs_migrations'
 const MIGRATION_LOCK_KEY = 7_625_837_178  // stable int < 2^53 (safe for JS + pg bigint)
 
-async function acquireLock(connection) {
+function quoteIdent(name) {
+    return `"${String(name).replace(/"/g, '""')}"`
+}
+
+async function acquireLock(connection, ctx) {
+    if (isSqlite(ctx)) return true
     // pg_try_advisory_lock returns false immediately if lock is taken
     const rows = await connection.raw(`SELECT pg_try_advisory_lock($1) AS acquired`, [MIGRATION_LOCK_KEY])
     const result = rows.rows ?? rows
     return result[0]?.acquired === true
 }
 
-async function releaseLock(connection) {
+async function releaseLock(connection, ctx) {
+    if (isSqlite(ctx)) return
     await connection.raw(`SELECT pg_advisory_unlock($1)`, [MIGRATION_LOCK_KEY]).catch(() => { })
 }
 
 // ─── Ensure migration tracking table exists ───────────────────────────────
-async function ensureMigrationsTable(connection) {
+async function ensureMigrationsTable(connection, ctx) {
+    if (isSqlite(ctx)) {
+        await connection.raw(`
+    CREATE TABLE IF NOT EXISTS _migrations (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      migration  TEXT    NOT NULL UNIQUE,
+      batch      INTEGER NOT NULL,
+      ran_at     TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+        return
+    }
+
     await connection.raw(`
     CREATE TABLE IF NOT EXISTS _migrations (
       id         SERIAL PRIMARY KEY,
@@ -81,7 +116,7 @@ async function getNextBatch(connection) {
 
 // ─── Main: run pending migrations ─────────────────────────────────────────
 export async function runMigrations(ctx) {
-    assertPgDriver(ctx)
+    assertSqlDriver(ctx)
     const cfg = resolveConfig(ctx)
     const migrationsDir = resolve(ctx.cwd, cfg.paths.migrations)
     const allFiles = scanMigrations(migrationsDir)
@@ -91,17 +126,12 @@ export async function runMigrations(ctx) {
         return { ran: 0 }
     }
 
-    let connection
-    try {
-        connection = await loadConnection(ctx)
-    } catch (err) {
-        throw new Error(`Cannot connect to database: ${err.message}`)
-    }
+    const connection = await openConnection(ctx)
 
-    await ensureMigrationsTable(connection)
+    await ensureMigrationsTable(connection, ctx)
 
     // Prevent concurrent migration runs (e.g. two deploy processes at once)
-    const locked = await acquireLock(connection).catch(() => false)
+    const locked = await acquireLock(connection, ctx).catch(() => false)
     if (!locked) {
         throw new Error('Another migration process is running. Please wait and try again.')
     }
@@ -135,7 +165,7 @@ export async function runMigrations(ctx) {
             }
         }
     } finally {
-        await releaseLock(connection)
+        await releaseLock(connection, ctx)
     }
 
     return { ran, batch }
@@ -143,18 +173,13 @@ export async function runMigrations(ctx) {
 
 // ─── Rollback last N batches ──────────────────────────────────────────────
 export async function rollbackMigrations(ctx, { step = 1 } = {}) {
-    assertPgDriver(ctx)
+    assertSqlDriver(ctx)
     const cfg = resolveConfig(ctx)
     const migrationsDir = resolve(ctx.cwd, cfg.paths.migrations)
 
-    let connection
-    try {
-        connection = await loadConnection(ctx)
-    } catch (err) {
-        throw new Error(`Cannot connect to database: ${err.message}`)
-    }
+    const connection = await openConnection(ctx)
 
-    await ensureMigrationsTable(connection)
+    await ensureMigrationsTable(connection, ctx)
     const ranMigrations = await getRanMigrations(connection)
 
     if (ranMigrations.length === 0) {
@@ -197,18 +222,13 @@ export async function rollbackMigrations(ctx, { step = 1 } = {}) {
 
 // ─── Rollback ALL migrations ──────────────────────────────────────────────
 export async function resetMigrations(ctx) {
-    assertPgDriver(ctx)
+    assertSqlDriver(ctx)
     const cfg = resolveConfig(ctx)
     const migrationsDir = resolve(ctx.cwd, cfg.paths.migrations)
 
-    let connection
-    try {
-        connection = await loadConnection(ctx)
-    } catch (err) {
-        throw new Error(`Cannot connect to database: ${err.message}`)
-    }
+    const connection = await openConnection(ctx)
 
-    await ensureMigrationsTable(connection)
+    await ensureMigrationsTable(connection, ctx)
     const ranMigrations = await getRanMigrations(connection)
 
     if (ranMigrations.length === 0) {
@@ -249,14 +269,9 @@ export async function getMigrationStatus(ctx) {
     const migrationsDir = resolve(ctx.cwd, cfg.paths.migrations)
     const allFiles = scanMigrations(migrationsDir)
 
-    let connection
-    try {
-        connection = await loadConnection(ctx)
-    } catch (err) {
-        throw new Error(`Cannot connect to database: ${err.message}`)
-    }
+    const connection = await openConnection(ctx)
 
-    await ensureMigrationsTable(connection)
+    await ensureMigrationsTable(connection, ctx)
     const ranMigrations = await getRanMigrations(connection)
     const ranMap = new Map(ranMigrations.map(r => [r.migration, r.batch]))
 
@@ -270,15 +285,16 @@ export async function getMigrationStatus(ctx) {
 
 // ─── Drop all tables (wipe) ───────────────────────────────────────────────
 export async function dropAllTables(ctx) {
-    let connection
-    try {
-        connection = await loadConnection(ctx)
-    } catch (err) {
-        throw new Error(`Cannot connect to database: ${err.message}`)
-    }
+    const connection = await openConnection(ctx)
+
+    const sqlite = isSqlite(ctx)
 
     // Get all user tables
-    const rows = await connection.raw(`
+    const rows = sqlite ? await connection.raw(`
+    SELECT name AS tablename FROM sqlite_master
+    WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+    ORDER BY name
+  `) : await connection.raw(`
     SELECT tablename FROM pg_tables
     WHERE schemaname = 'public'
     ORDER BY tablename
@@ -291,12 +307,15 @@ export async function dropAllTables(ctx) {
     }
 
     // Disable FK checks, drop all, re-enable
-    await connection.raw(`SET session_replication_role = 'replica'`)
+    if (sqlite) await connection.raw(`PRAGMA foreign_keys = OFF`)
+    else await connection.raw(`SET session_replication_role = 'replica'`)
     for (const table of tables) {
-        await connection.raw(`DROP TABLE IF EXISTS "${table}" CASCADE`)
+        const quotedTable = quoteIdent(table)
+        await connection.raw(sqlite ? `DROP TABLE IF EXISTS ${quotedTable}` : `DROP TABLE IF EXISTS ${quotedTable} CASCADE`)
         success(`Dropped table: ${table}`)
     }
-    await connection.raw(`SET session_replication_role = 'DEFAULT'`)
+    if (sqlite) await connection.raw(`PRAGMA foreign_keys = ON`)
+    else await connection.raw(`SET session_replication_role = 'DEFAULT'`)
 
     return { dropped: tables.length }
 }

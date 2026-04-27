@@ -654,6 +654,9 @@ const modelProxyHandler = {
             return Reflect.get(target, prop, receiver)
         }
 
+        // Relation that was eager-loaded
+        if (target.relationLoaded(prop)) return target.getRelation(prop)
+
         // Direct property on the target instance
         // Use receiver so methods keep `this = proxy` (for re-entrant attribute reads),
         // but we resolve the function FROM the target's prototype chain.
@@ -670,9 +673,6 @@ const modelProxyHandler = {
                 return ownDescriptor.value
             }
         }
-
-        // Relation that was eager-loaded
-        if (target.relationLoaded(prop)) return target.getRelation(prop)
 
         // Dynamic attribute read — check WeakMap state via raw(target)
         const rawAttr = target.getRawAttribute(prop)

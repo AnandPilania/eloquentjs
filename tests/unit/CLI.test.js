@@ -628,6 +628,14 @@ describe('init command', () => {
     expect(configWrite.content).toContain('MONGO_URL')
   })
 
+  test('--driver=sqlite uses sqlite config', async () => {
+    const { cmdInit } = await import('../../packages/cli/src/commands/init.js')
+    await cmdInit({ cwd: '/project', config: null, flags: { driver: 'sqlite' }, positional: [] })
+    const configWrite = capturedWrites.find(w => w.path.endsWith('eloquent.config.js'))
+    expect(configWrite.content).toContain("driver:   'sqlite'")
+    expect(configWrite.content).toContain('SQLITE_DATABASE')
+  })
+
   test('creates DatabaseSeeder', async () => {
     const { cmdInit } = await import('../../packages/cli/src/commands/init.js')
     await cmdInit({ cwd: '/project', config: null, flags: {}, positional: [] })
@@ -647,7 +655,7 @@ describe('init command', () => {
   test('throws for invalid driver', async () => {
     const { cmdInit } = await import('../../packages/cli/src/commands/init.js')
     await expect(
-      cmdInit({ cwd: '/project', config: null, flags: { driver: 'sqlite' }, positional: [] })
+      cmdInit({ cwd: '/project', config: null, flags: { driver: 'mysql' }, positional: [] })
     ).rejects.toThrow('Unknown driver')
   })
 })

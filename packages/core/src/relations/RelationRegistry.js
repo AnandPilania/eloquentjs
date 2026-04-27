@@ -496,7 +496,7 @@ class MorphTo {
         return Related.find(id)
     }
 
-    async eagerLoad(models, relName, constraints) {
+    async eagerLoad(models, relName, constraints, nested) {
         // Group models by morph type
         const groups = {}
         for (const m of models) {
@@ -511,7 +511,11 @@ class MorphTo {
             if (!Related) { for (const m of group) m.setRelation(relName, null); continue }
 
             const ids = group.map(m => m.getAttribute(this._idCol))
-            const results = await Related.whereIn(Related.primaryKey, ids).get()
+            let qb = Related.whereIn(Related.primaryKey, ids)
+            if (constraints) constraints(qb)
+            if (nested) qb = qb.with(nested)
+
+            const results = await qb.get()
             const map = {}
             for (const r of results) map[r.getAttribute(Related.primaryKey)] = r
 

@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from 'fs'
-import { resolve, join } from 'path'
-import { colors, success, info, warn, ensureDir, writeFile } from '../utils.js'
+import { resolve } from 'path'
+import { colors, success, warn, ensureDir, writeFile, normalizeDriver } from '../utils.js'
 
 export async function cmdInit(ctx) {
     const { cwd, flags } = ctx
@@ -34,20 +34,18 @@ export async function cmdInit(ctx) {
 
     // ── 2. Detect driver preference ─────────────────────────────────────────
     const driver = flags.driver ?? flags.db ?? 'pgsql'
-    const validDrivers = ['pgsql', 'postgres', 'postgresql', 'mongodb', 'mongo']
+    const validDrivers = ['pgsql', 'postgres', 'postgresql', 'sqlite', 'sqlite3', 'mongodb', 'mongo']
     if (!validDrivers.includes(driver)) {
-        throw new Error(`Unknown driver: ${driver}. Choose from: pgsql, mongodb`)
+        throw new Error(`Unknown driver: ${driver}. Choose from: pgsql, sqlite, mongodb`)
     }
-    const normalDriver = (driver === 'postgres' || driver === 'postgresql') ? 'pgsql'
-        : (driver === 'mongo') ? 'mongodb'
-            : driver
+    const normalizedDriver = normalizeDriver(driver)
 
     // ── 3. Write eloquent.config.js ─────────────────────────────────────────
     const configPath = resolve(cwd, 'eloquent.config.js')
     if (existsSync(configPath) && !force) {
         warn('eloquent.config.js already exists. Use --force to overwrite.')
     } else {
-        const configContent = generateConfig(normalDriver)
+        const configContent = generateConfig(normalizedDriver)
         writeFileSync(configPath, configContent, 'utf8')
         success('Created eloquent.config.js')
     }
@@ -73,7 +71,7 @@ export async function cmdInit(ctx) {
     // ── 6. Write .env.example ────────────────────────────────────────────────
     const envExamplePath = resolve(cwd, '.env.example')
     if (!existsSync(envExamplePath) || force) {
-        writeFileSync(envExamplePath, generateEnvExample(normalDriver), 'utf8')
+        writeFileSync(envExamplePath, generateEnvExample(normalizedDriver), 'utf8')
         success('Created .env.example')
     }
 
@@ -99,7 +97,7 @@ ${colors.bold}${colors.green}✔ EloquentJS initialized successfully!${colors.re
 ${colors.bold}Next steps:${colors.reset}
 
   1. Install dependencies:
-     ${colors.cyan}npm install @eloquentjs/core @eloquentjs/${normalDriver}${colors.reset}
+     ${colors.cyan}npm install @eloquentjs/core @eloquentjs/${normalizedDriver}${colors.reset}
 
   2. Copy and fill in your environment:
      ${colors.cyan}cp .env.example .env${colors.reset}
@@ -116,8 +114,10 @@ ${colors.bold}Next steps:${colors.reset}
 }
 
 function generateConfig(driver) {
-    const envVars = driver === 'pgsql'
-        ? `{
+    let envVars
+
+    if (driver === 'pgsql') {
+        envVars = `{
     driver:   '${driver}',
     host:     process.env.DB_HOST     ?? 'localhost',
     port:     Number(process.env.DB_PORT ?? 5432),
@@ -126,11 +126,18 @@ function generateConfig(driver) {
     password: process.env.DB_PASSWORD ?? '',
     ssl:      process.env.DB_SSL === 'true',
   }`
-        : `{
+    } else if (driver === 'sqlite') {
+        envVars = `{
+    driver:   '${driver}',
+    filename: process.env.SQLITE_DATABASE ?? 'database/database.sqlite',
+  }`
+    } else {
+        envVars = `{
     driver:   '${driver}',
     url:      process.env.MONGO_URL      ?? 'mongodb://localhost:27017',
     database: process.env.MONGO_DATABASE ?? 'myapp',
   }`
+    }
 
     return `/**
  * EloquentJS Configuration
@@ -176,6 +183,11 @@ DB_DATABASE=myapp
 DB_USERNAME=postgres
 DB_PASSWORD=
 DB_SSL=false
+`
+    }
+    if (driver === 'sqlite') {
+        return `# SQLite connection
+SQLITE_DATABASE=database/database.sqlite
 `
     }
     return `# MongoDB connection
