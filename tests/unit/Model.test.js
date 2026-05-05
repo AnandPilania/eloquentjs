@@ -92,6 +92,7 @@ beforeEach(() => {
   ])
   clearResolvers()
   setResolver(mock)
+  Model.reguard()
   HookRegistry.flushAll()
   EventEmitter.flushAll()
 })
@@ -189,6 +190,49 @@ describe('Model mass assignment', () => {
     user.forceFill({ id: 99, name: 'Forced' })
     expect(user.getRawAttribute('id')).toBe(99)
     expect(user.getRawAttribute('name')).toBe('Forced')
+  })
+
+  test('unguard() bypasses guarded and fillable rules', () => {
+    class LockedModel extends Model {
+      static table = 'locked_models'
+      static fillable = []
+      static guarded = ['*']
+      static timestamps = false
+    }
+
+    const model = new LockedModel()
+    model.fill({ name: 'Blocked', id: 10 })
+    expect(model.getRawAttribute('name')).toBeUndefined()
+    expect(model.getRawAttribute('id')).toBeUndefined()
+
+    Model.unguard()
+    model.fill({ name: 'Allowed', id: 10 })
+    expect(model.getRawAttribute('name')).toBe('Allowed')
+    expect(model.getRawAttribute('id')).toBe(10)
+  })
+
+  test('unguarded(callback) temporarily bypasses guards and then restores them', async () => {
+    class LockedModel extends Model {
+      static table = 'locked_models'
+      static fillable = []
+      static guarded = ['*']
+      static timestamps = false
+    }
+
+    const model = new LockedModel()
+
+    await Model.unguarded(async () => {
+      model.fill({ name: 'Temp', id: 42 })
+      expect(Model.isUnguarded()).toBe(true)
+    })
+
+    expect(model.getRawAttribute('name')).toBe('Temp')
+    expect(model.getRawAttribute('id')).toBe(42)
+    expect(Model.isUnguarded()).toBe(false)
+
+    const second = new LockedModel()
+    second.fill({ name: 'Blocked Again' })
+    expect(second.getRawAttribute('name')).toBeUndefined()
   })
 })
 

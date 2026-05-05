@@ -49,6 +49,7 @@ const _rels = new WeakMap()
 const _exists = new WeakMap()
 const _trashed = new WeakMap()
 const SELF = Symbol('self')  // proxy[SELF] → raw instance
+let _unguarded = false
 
 // Get the raw (non-proxy) instance for WeakMap keying.
 // Works whether `obj` is the proxy or the raw instance.
@@ -117,6 +118,28 @@ export class Model {
 
     static getResolver() {
         return getResolver(this.connection)
+    }
+
+    static unguard() {
+        _unguarded = true
+    }
+
+    static reguard() {
+        _unguarded = false
+    }
+
+    static isUnguarded() {
+        return _unguarded
+    }
+
+    static async unguarded(callback) {
+        const wasUnguarded = _unguarded
+        _unguarded = true
+        try {
+            return await callback()
+        } finally {
+            _unguarded = wasUnguarded
+        }
     }
 
     // ─── Query builder factory ─────────────────────────────────────────────────
@@ -268,6 +291,10 @@ export class Model {
     _getAllowedKeys(attributes) {
         const Klass = this.constructor
         const keys = Object.keys(attributes)
+
+        if (Klass.isUnguarded()) {
+            return keys
+        }
 
         if (Klass.guarded.includes('*')) {
             return Klass.fillable.length > 0 ? keys.filter(k => Klass.fillable.includes(k)) : []

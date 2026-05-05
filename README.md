@@ -12,7 +12,7 @@ const users = await User
   .paginate(1, 20)
 ```
 
-[![Tests](https://img.shields.io/badge/tests-735%20passing-brightgreen)](#)
+[![Tests](https://img.shields.io/badge/tests-737%20passing-brightgreen)](#)
 [![License](https://img.shields.io/badge/license-MIT-blue)](#)
 [![Node](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen)](#)
 [![MCP](https://img.shields.io/badge/MCP-compatible-purple)](#)
@@ -95,6 +95,16 @@ await User.where('active', true).with('posts').orderBy('name').paginate(1, 20)
 await User.whereIn('role', ['admin', 'editor']).get()
 await User.whereBetween('age', [18, 65]).count()
 await User.active().admins().latest().first()
+
+// Global mass-assignment bypass
+Model.unguard()
+await User.create({ id: 99, name: 'Seed User', email: 'seed@example.com' })
+Model.reguard()
+
+// Or use the scoped helper to restore automatically
+await Model.unguarded(async () => {
+  await User.create({ id: 99, name: 'Seed User', email: 'seed@example.com' })
+})
 ```
 
 ### Validation
@@ -242,7 +252,7 @@ eloquentjs/
 │   ├── mcp/           @eloquentjs/mcp
 │   └── cli/           @eloquentjs/cli
 ├── tests/
-│   └── unit/          700 tests, 12 suites, all passing
+│   └── unit/          702 tests, 12 suites, all passing
 ├── agent-files/       CLAUDE.md, .cursorrules, skills/...
 ├── .github/
 │   └── workflows/     CI + Release automation
