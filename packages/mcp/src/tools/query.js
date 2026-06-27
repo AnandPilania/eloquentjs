@@ -190,6 +190,7 @@ export async function handleMigrationStatus(args, ctx) {
 export async function handleRunSeeder(args, ctx) {
   const { resolveConfig, loadConnection } = await import('../../../cli/src/utils.js')
   const { resolve } = await import('path')
+  const { pathToFileURL } = await import('node:url')
   const cfg        = resolveConfig(ctx)
   const className  = args.seeder ?? 'DatabaseSeeder'
   const seederPath = resolve(ctx.cwd, cfg.paths.seeders, `${className}.js`)
@@ -199,7 +200,7 @@ export async function handleRunSeeder(args, ctx) {
   }
 
   await loadConnection(ctx)
-  const mod = await import(seederPath)
+  const mod = await import(pathToFileURL(seederPath).href)
   const SeederClass = mod.default
   const seeder = new SeederClass()
   await seeder.run()

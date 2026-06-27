@@ -27,8 +27,9 @@ After global install, the `eloquent` (or `ejs`) command is available everywhere.
 # Initialize EloquentJS in your project
 eloquent init
 
-# Initialize with MongoDB instead of PostgreSQL
+# Initialize with a different driver (pgsql is the default)
 eloquent init --driver=mongodb
+eloquent init --driver=sqlite
 
 # Create a model
 eloquent make:model User
@@ -53,6 +54,7 @@ eloquent db:seed
 |---|---|
 | `eloquent init` | Scaffold `eloquent.config.js`, directory structure, and `.env.example` |
 | `eloquent init --driver=mongodb` | Initialize with MongoDB driver |
+| `eloquent init --driver=sqlite` | Initialize with SQLite driver |
 | `eloquent list` | List all available commands |
 
 ### Generators (`make:*`)

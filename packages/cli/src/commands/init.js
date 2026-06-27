@@ -14,7 +14,7 @@ export async function cmdInit(ctx) {
         warn('No package.json found. Creating one...')
         writeFileSync(pkgPath, JSON.stringify({
             name: 'my-eloquentjs-app',
-            version: '0.0.2',
+            version: '0.0.3',
             type: 'module',
             scripts: {
                 migrate: 'eloquent migrate',
@@ -34,11 +34,14 @@ export async function cmdInit(ctx) {
 
     // ── 2. Detect driver preference ─────────────────────────────────────────
     const driver = flags.driver ?? flags.db ?? 'pgsql'
-    const validDrivers = ['pgsql', 'postgres', 'postgresql', 'sqlite', 'sqlite3', 'mongodb', 'mongo']
+    const validDrivers = ['pgsql', 'postgres', 'postgresql', 'mongodb', 'mongo', 'sqlite', 'sqlite3']
     if (!validDrivers.includes(driver)) {
-        throw new Error(`Unknown driver: ${driver}. Choose from: pgsql, sqlite, mongodb`)
+        throw new Error(`Unknown driver: ${driver}. Choose from: pgsql, mongodb, sqlite`)
     }
-    const normalizedDriver = normalizeDriver(driver)
+    const normalDriver = (driver === 'postgres' || driver === 'postgresql') ? 'pgsql'
+        : (driver === 'mongo') ? 'mongodb'
+            : (driver === 'sqlite3') ? 'sqlite'
+                : driver
 
     // ── 3. Write eloquent.config.js ─────────────────────────────────────────
     const configPath = resolve(cwd, 'eloquent.config.js')
@@ -114,30 +117,27 @@ ${colors.bold}Next steps:${colors.reset}
 }
 
 function generateConfig(driver) {
-    let envVars
-
-    if (driver === 'pgsql') {
-        envVars = `{
-    driver:   '${driver}',
+    const connections = {
+        pgsql: `{
+    driver:   'pgsql',
     host:     process.env.DB_HOST     ?? 'localhost',
     port:     Number(process.env.DB_PORT ?? 5432),
     database: process.env.DB_DATABASE ?? 'myapp',
     user:     process.env.DB_USERNAME ?? 'postgres',
     password: process.env.DB_PASSWORD ?? '',
     ssl:      process.env.DB_SSL === 'true',
-  }`
-    } else if (driver === 'sqlite') {
-        envVars = `{
-    driver:   '${driver}',
-    filename: process.env.SQLITE_DATABASE ?? 'database/database.sqlite',
-  }`
-    } else {
-        envVars = `{
-    driver:   '${driver}',
+  }`,
+        mongodb: `{
+    driver:   'mongodb',
     url:      process.env.MONGO_URL      ?? 'mongodb://localhost:27017',
     database: process.env.MONGO_DATABASE ?? 'myapp',
-  }`
+  }`,
+        sqlite: `{
+    driver:   'sqlite',
+    database: process.env.DB_DATABASE ?? './database.sqlite',
+  }`,
     }
+    const envVars = connections[driver] ?? connections.pgsql
 
     return `/**
  * EloquentJS Configuration
@@ -175,6 +175,11 @@ export default class DatabaseSeeder extends Seeder {
 }
 
 function generateEnvExample(driver) {
+    if (driver === 'sqlite') {
+        return `# SQLite connection — path to the database file (or :memory:)
+DB_DATABASE=./database.sqlite
+`
+    }
     if (driver === 'pgsql') {
         return `# PostgreSQL connection
 DB_HOST=localhost

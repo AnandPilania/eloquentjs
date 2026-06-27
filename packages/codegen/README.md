@@ -168,7 +168,7 @@ import { generateOpenApiSpec } from '@eloquentjs/codegen'
 
 const spec = generateOpenApiSpec(schemas, {
   title:    'My API',
-  version:  '0.0.2',
+  version:  '0.0.3',
   servers:  [{ url: 'https://api.example.com', description: 'Production' }],
   prefix:   '/api',
   security: [{ bearerAuth: [] }],

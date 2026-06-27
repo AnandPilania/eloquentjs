@@ -6,6 +6,14 @@
 npm install @eloquentjs/core @eloquentjs/pgsql
 ```
 
+This driver depends on [`pg`](https://www.npmjs.com/package/pg), which is installed
+automatically as a dependency — you do not need to install it separately.
+
+> **Troubleshooting:** If `eloquent migrate` reports `Driver package @eloquentjs/pgsql
+> is not installed` even though it is, you are almost certainly on an older release
+> where `pg` was not pulled in automatically. Upgrade to the latest `@eloquentjs/pgsql`,
+> or install `pg` directly with `npm install pg`.
+
 ---
 
 ## Setup

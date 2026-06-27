@@ -101,9 +101,10 @@ export function createServer(options = {}) {
         try {
             const { existsSync } = await import('fs')
             const { resolve } = await import('path')
+            const { pathToFileURL } = await import('node:url')
             const cfgPath = resolve(cwd, 'eloquent.config.js')
             if (existsSync(cfgPath)) {
-                const mod = await import(cfgPath)
+                const mod = await import(pathToFileURL(cfgPath).href)
                 _config = mod.default
             }
         } catch { }

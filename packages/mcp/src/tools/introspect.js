@@ -7,6 +7,7 @@
 
 import { existsSync, readdirSync } from 'fs'
 import { resolve, join } from 'path'
+import { pathToFileURL } from 'node:url'
 
 // ─── Tool definitions ──────────────────────────────────────────────────────────
 
@@ -86,7 +87,7 @@ export async function handleListModels(args, ctx) {
 
   for (const file of files) {
     try {
-      const mod = await import(join(dir, file))
+      const mod = await import(pathToFileURL(join(dir, file)).href)
       const ModelClass = mod.default
       if (!ModelClass || typeof ModelClass !== 'function') continue
 
@@ -128,7 +129,7 @@ export async function handleDescribeModel(args, ctx) {
     throw new Error(`Model file not found: ${filePath}`)
   }
 
-  const mod = await import(filePath)
+  const mod = await import(pathToFileURL(filePath).href)
   const ModelClass = mod.default
   if (!ModelClass) throw new Error(`No default export in ${filePath}`)
 

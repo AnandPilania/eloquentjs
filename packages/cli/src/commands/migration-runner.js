@@ -12,7 +12,8 @@
 
 import { resolve } from 'path'
 import { existsSync } from 'fs'
-import { success, info, warn, error, scanMigrations, resolveConfig, loadConnection, normalizeDriver } from '../utils.js'
+import { pathToFileURL } from 'node:url'
+import { colors, success, info, warn, error, scanMigrations, resolveConfig, loadConnection } from '../utils.js'
 
 // ─── Driver guard ─────────────────────────────────────────────────────────
 function getDriver(ctx) {
@@ -152,7 +153,8 @@ export async function runMigrations(ctx) {
 
         for (const mig of pending) {
             try {
-                const module = await import(mig.path)
+                const fileUrl = pathToFileURL(mig.path)
+                const module = await import(fileUrl.href)
                 const MigrationClass = module.default
                 const instance = new MigrationClass()
                 await instance.up()
@@ -204,7 +206,7 @@ export async function rollbackMigrations(ctx, { step = 1 } = {}) {
         }
 
         try {
-            const module = await import(migFile)
+            const module = await import(pathToFileURL(migFile).href)
             const MigrationClass = module.default
             const instance = new MigrationClass()
             await instance.down()
@@ -247,7 +249,7 @@ export async function resetMigrations(ctx) {
         }
 
         try {
-            const module = await import(migFile)
+            const module = await import(pathToFileURL(migFile).href)
             const MigrationClass = module.default
             const instance = new MigrationClass()
             await instance.down()

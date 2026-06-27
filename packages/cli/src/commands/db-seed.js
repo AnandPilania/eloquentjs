@@ -1,4 +1,5 @@
 import { resolve } from 'path'
+import { pathToFileURL } from 'node:url'
 import { existsSync } from 'fs'
 import { colors, success, info, error, resolveConfig, loadConnection, toPascalCase } from '../utils.js'
 
@@ -36,7 +37,7 @@ export async function cmdDbSeed(ctx) {
 
   // Load and run the seeder
   try {
-    const module = await import(seederFile)
+    const module = await import(pathToFileURL(seederFile).href)
     const SeederClass = module.default
 
     if (!SeederClass) {

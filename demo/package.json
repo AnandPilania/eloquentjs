@@ -1,0 +1,24 @@
+{
+    "name": "demo",
+    "version": "1.0.0",
+    "main": "index.js",
+    "scripts": {
+        "test": "echo \"Error: no test specified\" && exit 1",
+        "migrate": "node --env-file=.env node_modules/@eloquentjs/cli/bin/eloquent.js migrate",
+        "seed": "node --env-file=.env node_modules/@eloquentjs/cli/bin/eloquent.js db:seed"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "ISC",
+    "description": "",
+    "dependencies": {
+        "@eloquentjs/core": "file:../packages/core",
+        "@eloquentjs/pgsql": "file:../packages/pgsql",
+        "dotenv": "^17.4.2",
+        "express": "^5.2.1"
+    },
+    "devDependencies": {
+        "@eloquentjs/cli": "file:../packages/cli"
+    },
+    "type": "module"
+}

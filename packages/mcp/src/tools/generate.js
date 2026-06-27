@@ -108,7 +108,7 @@ export const generateTools = [
             properties: {
                 models: { type: 'array', items: { type: 'string' } },
                 title: { type: 'string', default: 'API' },
-                version: { type: 'string', default: '0.0.2' },
+                version: { type: 'string', default: '0.0.3' },
                 format: { type: 'string', enum: ['json', 'yaml'], default: 'json' },
                 write: { type: 'boolean', default: false },
                 outputFile: { type: 'string' },
@@ -295,7 +295,7 @@ export async function handleGenerateOpenApiSpec(args, ctx) {
     const schemas = introspectAll(classes)
     const spec = generateOpenApiSpec(schemas, {
         title: args.title ?? 'API',
-        version: args.version ?? '0.0.2',
+        version: args.version ?? '0.0.3',
     })
 
     const format = args.format ?? 'json'

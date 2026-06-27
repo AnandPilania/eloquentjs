@@ -257,6 +257,7 @@ const server = createServer({
   cwd: process.cwd(),
   config: {
     paths:      { models: 'src/models', migrations: 'src/migrations' },
+    // driver: 'pgsql' | 'mongodb' | 'sqlite' (resolved via the matching @eloquentjs/<driver> package)
     connection: { driver: 'pgsql', url: process.env.DATABASE_URL },
   },
 })

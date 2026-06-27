@@ -1,0 +1,23 @@
+# Normalize line endings across operating systems.
+# Without this, Windows checkouts convert LF->CRLF and show every source
+# file as "modified", and shipped files can carry the wrong line endings.
+
+# Default: treat as text and normalize to LF in the repo.
+* text=auto eol=lf
+
+# Source and config — always LF.
+*.js    text eol=lf
+*.mjs   text eol=lf
+*.cjs   text eol=lf
+*.json  text eol=lf
+*.md    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+
+# Binary assets — never touch.
+*.png   binary
+*.jpg   binary
+*.gif   binary
+*.ico   binary
+*.sqlite binary
+*.db    binary

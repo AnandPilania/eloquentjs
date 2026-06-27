@@ -11,6 +11,7 @@
 
 import { existsSync, readdirSync, writeFileSync, mkdirSync } from 'fs'
 import { resolve, join, dirname, basename } from 'path'
+import { pathToFileURL } from 'node:url'
 import { introspect, introspectAll } from './introspect.js'
 import {
   generateGraphqlSchema,
@@ -38,7 +39,7 @@ export async function loadModelsFromDir(modelsDir) {
   const models = []
   for (const file of files) {
     try {
-      const mod = await import(join(modelsDir, file))
+      const mod = await import(pathToFileURL(join(modelsDir, file)).href)
       const ModelClass = mod.default ?? Object.values(mod).find(v => typeof v === 'function')
       if (ModelClass && typeof ModelClass === 'function') {
         models.push(ModelClass)
@@ -65,7 +66,7 @@ export async function loadModelsByName(modelsDir, names) {
     if (!existsSync(file)) {
       throw new Error(`Model file not found: ${file}`)
     }
-    const mod = await import(file)
+    const mod = await import(pathToFileURL(file).href)
     const ModelClass = mod.default ?? Object.values(mod).find(v => typeof v === 'function')
     if (!ModelClass) throw new Error(`No default export in ${file}`)
     models.push(ModelClass)

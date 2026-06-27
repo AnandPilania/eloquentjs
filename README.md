@@ -21,19 +21,19 @@ const users = await User
 
 ## Packages
 
-| Package | Version | Description |
-|---|---|---|
-| [`@eloquentjs/core`](./packages/core) | ![npm](https://img.shields.io/npm/v/@eloquentjs/core) | Base Model, QueryBuilder, Relations, Events, Casts |
-| [`@eloquentjs/codegen`](./packages/codegen) | ![npm](https://img.shields.io/npm/v/@eloquentjs/codegen) | Shared code generation — GraphQL SDL, TypeScript, OpenAPI, stubs |
+| Package                                         | Version                                                    | Description                                                               |
+| ----------------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------- |
+| [`@eloquentjs/core`](./packages/core)           | ![npm](https://img.shields.io/npm/v/@eloquentjs/core)      | Base Model, QueryBuilder, Relations, Events, Casts                        |
+| [`@eloquentjs/codegen`](./packages/codegen)     | ![npm](https://img.shields.io/npm/v/@eloquentjs/codegen)   | Shared code generation — GraphQL SDL, TypeScript, OpenAPI, stubs          |
 | [`@eloquentjs/validator`](./packages/validator) | ![npm](https://img.shields.io/npm/v/@eloquentjs/validator) | Full validation — async rules, fluent schema API, unique/exists, adapters |
-| [`@eloquentjs/pgsql`](./packages/pgsql) | ![npm](https://img.shields.io/npm/v/@eloquentjs/pgsql) | PostgreSQL driver (multi-connection, transactions) |
-| [`@eloquentjs/sqlite`](./packages/sqlite) | ![npm](https://img.shields.io/npm/v/@eloquentjs/sqlite) | SQLite driver (local files, in-memory databases, migrations) |
-| [`@eloquentjs/mongodb`](./packages/mongodb) | ![npm](https://img.shields.io/npm/v/@eloquentjs/mongodb) | MongoDB driver |
-| [`@eloquentjs/realtime`](./packages/realtime) | ![npm](https://img.shields.io/npm/v/@eloquentjs/realtime) | WebSocket pub/sub — Pusher-protocol, auto-broadcast |
-| [`@eloquentjs/graphql`](./packages/graphql) | ![npm](https://img.shields.io/npm/v/@eloquentjs/graphql) | Auto-generate GraphQL schema + resolvers |
-| [`@eloquentjs/api`](./packages/api) | ![npm](https://img.shields.io/npm/v/@eloquentjs/api) | One-line REST CRUD routes (Express + Fastify) |
-| [`@eloquentjs/mcp`](./packages/mcp) | ![npm](https://img.shields.io/npm/v/@eloquentjs/mcp) | MCP server — 21 tools for AI agents (Claude, Cursor, Windsurf) |
-| [`@eloquentjs/cli`](./packages/cli) | ![npm](https://img.shields.io/npm/v/@eloquentjs/cli) | CLI — scaffold, migrate, seed, generate |
+| [`@eloquentjs/pgsql`](./packages/pgsql)         | ![npm](https://img.shields.io/npm/v/@eloquentjs/pgsql)     | PostgreSQL driver (multi-connection, transactions)                        |
+| [`@eloquentjs/sqlite`](./packages/sqlite)       | ![npm](https://img.shields.io/npm/v/@eloquentjs/sqlite)    | SQLite driver (better-sqlite3, file or in-memory)                         |
+| [`@eloquentjs/mongodb`](./packages/mongodb)     | ![npm](https://img.shields.io/npm/v/@eloquentjs/mongodb)   | MongoDB driver                                                            |
+| [`@eloquentjs/realtime`](./packages/realtime)   | ![npm](https://img.shields.io/npm/v/@eloquentjs/realtime)  | WebSocket pub/sub — Pusher-protocol, auto-broadcast                       |
+| [`@eloquentjs/graphql`](./packages/graphql)     | ![npm](https://img.shields.io/npm/v/@eloquentjs/graphql)   | Auto-generate GraphQL schema + resolvers                                  |
+| [`@eloquentjs/api`](./packages/api)             | ![npm](https://img.shields.io/npm/v/@eloquentjs/api)       | One-line REST CRUD routes (Express + Fastify)                             |
+| [`@eloquentjs/mcp`](./packages/mcp)             | ![npm](https://img.shields.io/npm/v/@eloquentjs/mcp)       | MCP server — 21 tools for AI agents (Claude, Cursor, Windsurf)            |
+| [`@eloquentjs/cli`](./packages/cli)             | ![npm](https://img.shields.io/npm/v/@eloquentjs/cli)       | CLI — scaffold, migrate, seed, generate                                   |
 
 ---
 
@@ -223,16 +223,16 @@ Configure in your AI tool — see [`@eloquentjs/mcp`](./packages/mcp/README.md) 
 
 The `agent-files/` directory contains ready-to-use files for AI coding assistants:
 
-| File | For |
-|---|---|
-| `CLAUDE.md` | Claude.ai — drop in project root, auto-loaded |
-| `GEMINI.md` | Gemini-based tools |
-| `.cursorrules` | Cursor — drop in project root |
-| `.windsurfrules` | Windsurf — drop in project root |
+| File                      | For                                                        |
+| ------------------------- | ---------------------------------------------------------- |
+| `CLAUDE.md`               | Claude.ai — drop in project root, auto-loaded              |
+| `GEMINI.md`               | Gemini-based tools                                         |
+| `.cursorrules`            | Cursor — drop in project root                              |
+| `.windsurfrules`          | Windsurf — drop in project root                            |
 | `copilot-instructions.md` | GitHub Copilot — copy to `.github/copilot-instructions.md` |
-| `skills/db-skill.md` | Deep DB patterns for any agent |
-| `skills/api-skill.md` | REST API patterns |
-| `skills/mcp-skill.md` | MCP tool reference and setup |
+| `skills/db-skill.md`      | Deep DB patterns for any agent                             |
+| `skills/api-skill.md`     | REST API patterns                                          |
+| `skills/mcp-skill.md`     | MCP tool reference and setup                               |
 
 ---
 
@@ -289,7 +289,7 @@ npm run release:minor    # 1.0.0 → 1.1.0
 npm run release:major    # 1.0.0 → 2.0.0
 npm run release:alpha    # 1.0.0 → 1.0.1-alpha.0
 npm run release:beta     # 1.0.0 → 1.0.1-beta.0
-npm run publish:all      # publish all 10 packages to npm
+npm run publish:all      # publish all 11 packages to npm
 ```
 
 ---

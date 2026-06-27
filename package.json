@@ -1,7 +1,7 @@
 {
   "name": "eloquentjs",
   "version": "0.0.3",
-  "description": "EloquentJS monorepo — Laravel Eloquent for Node.js",
+  "description": "EloquentJS monorepo \u2014 Laravel Eloquent for Node.js",
   "private": true,
   "type": "module",
   "author": {
@@ -39,13 +39,13 @@
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand --detectOpenHandles --forceExit",
     "test:unit": "node --experimental-vm-modules node_modules/jest/bin/jest.js tests/unit --runInBand --forceExit",
     "test:coverage": "node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage --runInBand --forceExit",
-    "build": "echo 'ESM — no build step needed'",
+    "build": "echo 'ESM \u2014 no build step needed'",
     "eloquent": "node packages/cli/bin/eloquent.js",
     "changeset": "changeset",
     "sync": "node scripts/sync-metadata.js",
     "version-packages": "changeset version && npm run sync && npm install",
-    "clean": "npm run clean:workspaces && rm -rf node_modules",
-    "clean:workspaces": "npm exec --workspaces -- rm -rf node_modules dist",
+    "clean": "npm run clean:workspaces && rimraf node_modules",
+    "clean:workspaces": "npm exec --workspaces -- rimraf node_modules dist",
     "release": "npm run test && npm run version-packages && changeset publish",
     "release:dry-run": "npm run test && changeset version && npm run sync && changeset publish --dry-run",
     "release:patch": "node scripts/release.js patch",
@@ -68,7 +68,8 @@
     "@faker-js/faker": "^8.4.1",
     "cross-env": "^10.1.0",
     "glob": "^10.5.0",
-    "jest": "^29.7.0"
+    "jest": "^29.7.0",
+    "rimraf": "^6.0.1"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1"

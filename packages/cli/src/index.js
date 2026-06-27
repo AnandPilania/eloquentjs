@@ -22,7 +22,8 @@
 
 import { argv, exit } from 'process'
 import { resolve } from 'path'
-import { existsSync } from 'fs'
+import { existsSync, readFileSync } from 'fs'
+import { pathToFileURL } from 'node:url'
 
 import { cmdInit } from './commands/init.js'
 import { cmdMakeModel } from './commands/make-model.js'
@@ -44,9 +45,13 @@ import { colors, parseArgs } from './utils.js'
 const args = argv.slice(2)
 const { command, flags, positional } = parseArgs(args)
 
-// Banner
+// Banner — version is read from the CLI's own package.json so it never drifts
+const pkgVersion = JSON.parse(
+    readFileSync(new URL('../package.json', import.meta.url), 'utf8')
+).version
+const titleLine = `  EloquentJS CLI  v${pkgVersion}`.padEnd(30)
 const banner = `${colors.cyan}╔══════════════════════════════╗
-║  EloquentJS CLI  v0.0.2      ║
+║${titleLine}║
 ╚══════════════════════════════╝${colors.reset}`
 
 if (!command || command === 'list' || command === '--help' || command === '-h') {
@@ -59,7 +64,7 @@ if (!command || command === 'list' || command === '--help' || command === '-h') 
 const cwd = process.cwd()
 const configPath = resolve(cwd, 'eloquent.config.js')
 const config = existsSync(configPath)
-    ? (await import(configPath)).default
+    ? (await import(pathToFileURL(configPath).href)).default
     : null
 
 const ctx = { cwd, config, flags, positional }

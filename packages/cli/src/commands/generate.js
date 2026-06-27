@@ -187,7 +187,7 @@ async function generateOpenApi(ctx) {
         format,
         options: {
             title: apiTitle,
-            version: ctx.config?.version ?? '0.0.2',
+            version: ctx.config?.version ?? '0.0.3',
         },
     })
 
