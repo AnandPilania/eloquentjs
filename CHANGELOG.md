@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.0.4] — 2026-06-27
+
+### 🐛 Bug Fixes
+
+- sql test (`a46563b`)
+- #1 & #5; (`ee37e4d`)
+- publish script (`d5beb86`)
+
+### ✨ Features
+
+- **model:** add model unguard (`436c7b7`)
+- **sqlite:** add sqlite support (`960acb3`)
+
+
+---
+
 ## [0.0.3] — 2026-04-07
 
 ### 🐛 Bug Fixes

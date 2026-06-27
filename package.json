@@ -1,7 +1,7 @@
 {
   "name": "eloquentjs",
-  "version": "0.0.3",
-  "description": "EloquentJS monorepo \u2014 Laravel Eloquent for Node.js",
+  "version": "0.0.4",
+  "description": "EloquentJS monorepo — Laravel Eloquent for Node.js",
   "private": true,
   "type": "module",
   "author": {
@@ -39,7 +39,7 @@
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand --detectOpenHandles --forceExit",
     "test:unit": "node --experimental-vm-modules node_modules/jest/bin/jest.js tests/unit --runInBand --forceExit",
     "test:coverage": "node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage --runInBand --forceExit",
-    "build": "echo 'ESM \u2014 no build step needed'",
+    "build": "echo 'ESM — no build step needed'",
     "eloquent": "node packages/cli/bin/eloquent.js",
     "changeset": "changeset",
     "sync": "node scripts/sync-metadata.js",

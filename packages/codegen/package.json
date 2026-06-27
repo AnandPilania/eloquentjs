@@ -1,6 +1,6 @@
 {
   "name": "@eloquentjs/codegen",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "Shared code generation engine for EloquentJS — introspect models, render stubs, emit GraphQL SDL, TypeScript types, OpenAPI specs",
   "type": "module",
   "main": "src/index.js",
@@ -20,7 +20,7 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "@eloquentjs/core": "^0.0.3"
+    "@eloquentjs/core": "^0.0.4"
   },
   "author": {
     "name": "Anand Pilania",
