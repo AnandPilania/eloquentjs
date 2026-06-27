@@ -38,10 +38,7 @@ export async function cmdInit(ctx) {
     if (!validDrivers.includes(driver)) {
         throw new Error(`Unknown driver: ${driver}. Choose from: pgsql, mongodb, sqlite`)
     }
-    const normalDriver = (driver === 'postgres' || driver === 'postgresql') ? 'pgsql'
-        : (driver === 'mongo') ? 'mongodb'
-            : (driver === 'sqlite3') ? 'sqlite'
-                : driver
+    const normalizedDriver = normalizeDriver(driver)
 
     // ── 3. Write eloquent.config.js ─────────────────────────────────────────
     const configPath = resolve(cwd, 'eloquent.config.js')
@@ -134,7 +131,7 @@ function generateConfig(driver) {
   }`,
         sqlite: `{
     driver:   'sqlite',
-    database: process.env.DB_DATABASE ?? './database.sqlite',
+    database: process.env.SQLITE_DATABASE ?? './database.sqlite',
   }`,
     }
     const envVars = connections[driver] ?? connections.pgsql
@@ -177,7 +174,7 @@ export default class DatabaseSeeder extends Seeder {
 function generateEnvExample(driver) {
     if (driver === 'sqlite') {
         return `# SQLite connection — path to the database file (or :memory:)
-DB_DATABASE=./database.sqlite
+SQLITE_DATABASE=./database.sqlite
 `
     }
     if (driver === 'pgsql') {
@@ -188,11 +185,6 @@ DB_DATABASE=myapp
 DB_USERNAME=postgres
 DB_PASSWORD=
 DB_SSL=false
-`
-    }
-    if (driver === 'sqlite') {
-        return `# SQLite connection
-SQLITE_DATABASE=database/database.sqlite
 `
     }
     return `# MongoDB connection

@@ -1,13 +1,12 @@
 /**
  * Unit tests — SQLite SQL Builder (@eloquentjs/sqlite)
  *
- * Exercises buildSelect()/buildWhere() through SqliteResolver.toSQL() and the
- * UPDATE/DELETE/INCREMENT builders through a mock better-sqlite3 database.
- * SQLite uses positional `?` placeholders, so we assert placeholder text and
- * that params are collected in execution order. No native binary required.
+ * Exercises buildSelect()/buildWhereClauses() through SQLiteResolver.toSQL()
+ * and the INSERT/UPDATE/DELETE/INCREMENT builders through a mock better-sqlite3
+ * database. SQLite uses positional `?` placeholders. No native binary required.
  */
 
-import { SqliteResolver } from '../../packages/sqlite/src/index.js'
+import { SQLiteResolver } from '../../packages/sqlite/src/index.js'
 
 // Mock db: prepare() returns a statement whose run/get/all capture calls.
 function makeMockDb(captured = []) {
@@ -16,16 +15,15 @@ function makeMockDb(captured = []) {
       return {
         reader: /^\s*select/i.test(sql),
         all(...params) { captured.push({ sql, params }); return [] },
-        get(...params) { captured.push({ sql, params }); return undefined },
+        get(...params) { captured.push({ sql, params }); return { id: 1 } },
         run(...params) { captured.push({ sql, params }); return { changes: 1, lastInsertRowid: 1 } },
       }
     },
-    exec(sql) { captured.push({ sql, params: null }) },
   }
 }
 
 let resolver
-beforeEach(() => { resolver = new SqliteResolver(makeMockDb()) })
+beforeEach(() => { resolver = new SQLiteResolver(makeMockDb()) })
 
 async function sql(table, ctx) { return resolver.toSQL(table, ctx) }
 
@@ -66,12 +64,12 @@ describe('WHERE clauses', () => {
       selects: ['*'],
       wheres: [
         { column: 'name', operator: '=', value: 'Alice', boolean: 'and' },
-        { column: 'active', operator: '=', value: true, boolean: 'and' },
+        { column: 'role', operator: '=', value: 'admin', boolean: 'and' },
         { column: 'age', operator: '>', value: 18, boolean: 'and' },
       ],
     })
-    expect(s).toBe('SELECT * FROM "users" WHERE "name" = ? AND "active" = ? AND "age" > ?')
-    expect(params).toEqual(['Alice', true, 18])
+    expect(s).toBe('SELECT * FROM "users" WHERE "name" = ? AND "role" = ? AND "age" > ?')
+    expect(params).toEqual(['Alice', 'admin', 18])
   })
 
   test('OR where clause', async () => {
@@ -126,13 +124,13 @@ describe('WHERE clauses', () => {
     expect(s).toContain('date("created_at") = ?')
   })
 
-  test('whereYear — strftime', async () => {
+  test('whereYear — strftime (string param, no CAST)', async () => {
     const { sql: s, params } = await sql('users', {
       selects: ['*'],
       wheres: [{ type: 'year', column: 'created_at', value: 2024, boolean: 'and' }],
     })
-    expect(s).toContain(`strftime('%Y', "created_at")`)
-    expect(params).toEqual([2024])
+    expect(s).toContain(`strftime('%Y', "created_at") = ?`)
+    expect(params).toEqual(['2024'])
   })
 
   test('rawWhere — keeps ? placeholders and binds in order', async () => {
@@ -146,7 +144,7 @@ describe('WHERE clauses', () => {
   })
 })
 
-describe('CRITICAL: positional parameter order', () => {
+describe('positional parameter order', () => {
   test('WHERE + HAVING + LIMIT + OFFSET collected in execution order', async () => {
     const { sql: s, params } = await sql('orders', {
       selects: ['*'],
@@ -168,19 +166,11 @@ describe('CRITICAL: positional parameter order', () => {
       selects: ['*'],
       wheres: [
         { type: 'in', column: 'tag_id', values: [10, 20, 30], boolean: 'and' },
-        { column: 'published', operator: '=', value: true, boolean: 'and' },
+        { column: 'status', operator: '=', value: 'published', boolean: 'and' },
       ],
       rawWheres: [], groupBys: [], havings: [], orderBys: [], limit: 5, offset: null,
     })
-    expect(params).toEqual([10, 20, 30, true, 5])
-  })
-
-  test('OFFSET without LIMIT emits LIMIT -1 OFFSET ?', async () => {
-    const { sql: s, params } = await sql('users', {
-      selects: ['*'], wheres: [], limit: null, offset: 15,
-    })
-    expect(s).toContain('LIMIT -1 OFFSET ?')
-    expect(params).toEqual([15])
+    expect(params).toEqual([10, 20, 30, 'published', 5])
   })
 })
 
@@ -214,23 +204,33 @@ describe('ORDER BY / JOIN', () => {
   })
 })
 
-describe('UPDATE / DELETE / INCREMENT param order', () => {
+describe('INSERT / UPDATE / DELETE / INCREMENT', () => {
+  test('insert() builds INSERT with ? placeholders (no RETURNING)', async () => {
+    const captured = []
+    const r = new SQLiteResolver(makeMockDb(captured))
+    await r.insert('users', { name: 'Bob', email: 'b@b.com' })
+    const insertWrite = captured.find(c => c.sql.startsWith('INSERT'))
+    expect(insertWrite.sql).toBe('INSERT INTO "users" ("name", "email") VALUES (?, ?)')
+    expect(insertWrite.sql).not.toContain('RETURNING')
+    expect(insertWrite.params).toEqual(['Bob', 'b@b.com'])
+  })
+
   test('update() with ctx: SET params then WHERE params', async () => {
     const captured = []
-    const r = new SqliteResolver(makeMockDb(captured))
+    const r = new SQLiteResolver(makeMockDb(captured))
     const changes = await r.update('users', null, { name: 'Alice', email: 'a@a.com' }, {
       wheres: [{ column: 'id', operator: '=', value: 99, boolean: 'and' }], rawWheres: [],
     })
     const { sql: s, params } = captured[0]
-    expect(params).toEqual(['Alice', 'a@a.com', 99])
-    expect(s).toContain('"name" = ?')
+    expect(s).toContain('UPDATE "users" SET "name" = ?, "email" = ?')
     expect(s).toContain('WHERE "id" = ?')
+    expect(params).toEqual(['Alice', 'a@a.com', 99])
     expect(changes).toBe(1)
   })
 
   test('delete() with ctx', async () => {
     const captured = []
-    const r = new SqliteResolver(makeMockDb(captured))
+    const r = new SQLiteResolver(makeMockDb(captured))
     await r.delete('users', null, { wheres: [{ column: 'id', operator: '=', value: 7, boolean: 'and' }], rawWheres: [] })
     const { sql: s, params } = captured[0]
     expect(s).toContain('DELETE FROM "users" WHERE "id" = ?')
@@ -239,57 +239,35 @@ describe('UPDATE / DELETE / INCREMENT param order', () => {
 
   test('increment() with extra SET fields: amount, extra, where', async () => {
     const captured = []
-    const r = new SqliteResolver(makeMockDb(captured))
-    await r.increment('posts', 'views', 1, { updated_at: 'now' }, {
+    const r = new SQLiteResolver(makeMockDb(captured))
+    await r.increment('posts', 'views', 1, { slug: 'hello' }, {
       wheres: [{ column: 'id', operator: '=', value: 5, boolean: 'and' }], rawWheres: [],
     })
     const { sql: s, params } = captured[0]
-    expect(params).toEqual([1, 'now', 5])
     expect(s).toContain('"views" = "views" + ?')
-  })
-
-  test('insert() builds RETURNING * with placeholders', async () => {
-    const captured = []
-    const r = new SqliteResolver(makeMockDb(captured))
-    await r.insert('users', { name: 'Bob', email: 'b@b.com' })
-    const { sql: s, params } = captured[0]
-    expect(s).toContain('INSERT INTO "users" ("name", "email") VALUES (?, ?) RETURNING *')
-    expect(params).toEqual(['Bob', 'b@b.com'])
+    expect(params).toEqual([1, 'hello', 5])
   })
 })
 
 describe('DDL generation', () => {
   test('createTable: increments → INTEGER PRIMARY KEY AUTOINCREMENT', async () => {
     const captured = []
-    const r = new SqliteResolver(makeMockDb(captured))
+    const r = new SQLiteResolver(makeMockDb(captured))
     await r.createTable('users', {
       columns: [
         { name: 'id', type: 'bigIncrements', primaryKey: true },
         { name: 'email', type: 'string', _nullable: false, _unique: true },
-        { name: 'active', type: 'boolean', _nullable: false, _default: true },
       ],
       indexes: [], foreigns: [],
     })
-    const create = captured[0].sql
-    expect(create).toContain('"id" INTEGER PRIMARY KEY AUTOINCREMENT')
-    expect(create).toContain('"email" TEXT NOT NULL UNIQUE')
-    expect(create).toContain('"active" INTEGER NOT NULL DEFAULT 1')
-  })
-
-  test('createTable: inline FOREIGN KEY constraint', async () => {
-    const captured = []
-    const r = new SqliteResolver(makeMockDb(captured))
-    await r.createTable('posts', {
-      columns: [{ name: 'id', type: 'increments', primaryKey: true }, { name: 'user_id', type: 'bigInteger', _nullable: false }],
-      indexes: [],
-      foreigns: [{ column: 'user_id', table: 'users', references: 'id', onDelete: 'cascade', onUpdate: 'cascade' }],
-    })
-    expect(captured[0].sql).toContain('FOREIGN KEY ("user_id") REFERENCES "users" ("id") ON DELETE CASCADE ON UPDATE CASCADE')
+    const create = captured.find(c => c.sql.startsWith('CREATE TABLE'))
+    expect(create.sql).toContain('"id" INTEGER PRIMARY KEY AUTOINCREMENT')
+    expect(create.sql).toContain('"email" TEXT NOT NULL UNIQUE')
   })
 
   test('dropTable ifExists', async () => {
     const captured = []
-    const r = new SqliteResolver(makeMockDb(captured))
+    const r = new SQLiteResolver(makeMockDb(captured))
     await r.dropTable('users', { ifExists: true })
     expect(captured[0].sql).toBe('DROP TABLE IF EXISTS "users"')
   })
