@@ -25,6 +25,14 @@ export class ValidationException extends Error {
   }
 }
 
+/** Authorization failure — @eloquentjs/api maps this to HTTP 403. */
+export class PolicyException extends Error {
+  constructor(message = 'Forbidden') {
+    super(message)
+    this.name = 'PolicyException'
+  }
+}
+
 export class RelationNotFoundException extends Error {
   constructor(model, relation) {
     super(`Relation "${relation}" not found on model "${model}"`)

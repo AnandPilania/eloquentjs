@@ -9,7 +9,9 @@
     "ejs": "./bin/eloquent.js"
   },
   "exports": {
-    ".": "./src/index.js"
+    ".": "./src/index.js",
+    "./utils": "./src/utils.js",
+    "./migration-runner": "./src/commands/migration-runner.js"
   },
   "files": [
     "src",
@@ -25,7 +27,6 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "chokidar": "^3.6.0",
     "@eloquentjs/core": "^0.0.4",
     "@eloquentjs/codegen": "^0.0.4"
   },
@@ -56,5 +57,8 @@
   "bugs": {
     "url": "https://github.com/AnandPilania/eloquentjs/issues"
   },
-  "homepage": "https://github.com/AnandPilania/eloquentjs#readme"
+  "homepage": "https://github.com/AnandPilania/eloquentjs#readme",
+  "engines": {
+    "node": ">=20.6.0"
+  }
 }

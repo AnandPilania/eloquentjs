@@ -127,7 +127,7 @@ export async function handleGenerateModel(args, ctx) {
         generateFactoryStub, generateSeederStub,
     } = await import('@eloquentjs/codegen/templates')
     const { resolveConfig, toPascalCase, toTableName, migrationTimestamp } =
-        await import('../../../cli/src/utils.js')
+        await import('@eloquentjs/cli/utils')
 
     const cfg = resolveConfig(ctx)
     const name = toPascalCase(args.name)
@@ -196,7 +196,7 @@ export async function handleGenerateModel(args, ctx) {
 export async function handleGenerateMigration(args, ctx) {
     const { generateMigrationStub } = await import('@eloquentjs/codegen/templates')
     const { resolveConfig, toSnakeCase, migrationTimestamp } =
-        await import('../../../cli/src/utils.js')
+        await import('@eloquentjs/cli/utils')
 
     const cfg = resolveConfig(ctx)
     const name = toSnakeCase(args.name)
@@ -228,7 +228,7 @@ export async function handleGenerateMigration(args, ctx) {
 }
 
 export async function handleGenerateGraphqlSchema(args, ctx) {
-    const { resolveConfig } = await import('../../../cli/src/utils.js')
+    const { resolveConfig } = await import('@eloquentjs/cli/utils')
     const { introspectAll } = await import('@eloquentjs/codegen/introspect')
     const { generateGraphqlSchema } = await import('@eloquentjs/codegen/templates')
     const { loadModelsFromDir, loadModelsByName } = await import('@eloquentjs/codegen/render')
@@ -256,7 +256,7 @@ export async function handleGenerateGraphqlSchema(args, ctx) {
 }
 
 export async function handleGenerateTypeScriptTypes(args, ctx) {
-    const { resolveConfig } = await import('../../../cli/src/utils.js')
+    const { resolveConfig } = await import('@eloquentjs/cli/utils')
     const { introspectAll } = await import('@eloquentjs/codegen/introspect')
     const { generateTypeScriptFile } = await import('@eloquentjs/codegen/templates')
     const { loadModelsFromDir, loadModelsByName } = await import('@eloquentjs/codegen/render')
@@ -281,7 +281,7 @@ export async function handleGenerateTypeScriptTypes(args, ctx) {
 }
 
 export async function handleGenerateOpenApiSpec(args, ctx) {
-    const { resolveConfig } = await import('../../../cli/src/utils.js')
+    const { resolveConfig } = await import('@eloquentjs/cli/utils')
     const { introspectAll } = await import('@eloquentjs/codegen/introspect')
     const { generateOpenApiSpec } = await import('@eloquentjs/codegen/templates')
     const { loadModelsFromDir, loadModelsByName } = await import('@eloquentjs/codegen/render')

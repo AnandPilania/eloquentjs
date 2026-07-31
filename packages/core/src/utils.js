@@ -22,10 +22,18 @@ export function toSnakeCase(str) {
  * Convert a PascalCase class name to a snake_plural table name.
  *   User        → users
  *   UserProfile → user_profiles
- *   Category    → categorys  (intentionally simple — override static table)
+ *   Category    → categories
+ *   Box / Dish  → boxes / dishes
+ *   Day         → days      (vowel before -y keeps the y)
+ *
+ * Regular English plurals only — irregulars (Person → people, Mouse → mice)
+ * still need `static table`.
  */
 export function toSnakePlural(name) {
-    return toSnakeCase(name) + 's'
+    const snake = toSnakeCase(name)
+    if (/[^aeiou]y$/.test(snake)) return snake.slice(0, -1) + 'ies'
+    if (/(s|x|z|ch|sh)$/.test(snake)) return snake + 'es'
+    return snake + 's'
 }
 
 /**

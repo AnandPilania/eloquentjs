@@ -3,6 +3,7 @@ export default {
   transform: {},
   moduleNameMapper: {
     '^@eloquentjs/core$':              '<rootDir>/packages/core/src/index.js',
+    '^@eloquentjs/core/testing$':      '<rootDir>/packages/core/src/testing/conformance.js',
     '^@eloquentjs/pgsql$':             '<rootDir>/packages/pgsql/src/index.js',
     '^@eloquentjs/sqlite$':            '<rootDir>/packages/sqlite/src/index.js',
     '^@eloquentjs/mongodb$':           '<rootDir>/packages/mongodb/src/index.js',
@@ -10,6 +11,8 @@ export default {
     '^@eloquentjs/graphql$':           '<rootDir>/packages/graphql/src/index.js',
     '^@eloquentjs/api$':               '<rootDir>/packages/api/src/index.js',
     '^@eloquentjs/cli$':               '<rootDir>/packages/cli/src/index.js',
+    '^@eloquentjs/cli/utils$':         '<rootDir>/packages/cli/src/utils.js',
+    '^@eloquentjs/cli/migration-runner$': '<rootDir>/packages/cli/src/commands/migration-runner.js',
     '^@eloquentjs/validator$':         '<rootDir>/packages/validator/src/index.js',
     '^@eloquentjs/validator/schema':   '<rootDir>/packages/validator/src/Schema.js',
     '^@eloquentjs/validator/rule':     '<rootDir>/packages/validator/src/Rule.js',

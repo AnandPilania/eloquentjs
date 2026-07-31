@@ -130,6 +130,13 @@ export class MongoResolver {
         return { ...normalizeDoc(doc), id, _id: id, insertedId: result.insertedId }
     }
 
+    async insertMany(table, rows) {
+        if (!Array.isArray(rows) || !rows.length) return []
+        const docs = rows.map(prepareInsertDoc)
+        const result = await this._col(table).insertMany(docs)
+        return docs.map((doc, i) => normalizeDoc({ ...doc, _id: doc._id ?? result.insertedIds[i] }))
+    }
+
     async update(table, conditions, data, ctx = null) {
         const filter = ctx ? buildFilter(ctx) : buildSimpleFilter(conditions)
         // Remove undefined values
@@ -264,19 +271,33 @@ export class MongoResolver {
 
 // ─── Filter builder ──────────────────────────────────────────────────────────
 function buildFilter(ctx) {
-    const conditions = []
+    return combineWheres(ctx?.wheres ?? [])
+}
 
-    for (const w of ctx?.wheres ?? []) {
-        conditions.push(buildWhereCondition(w))
+/**
+ * OR splits the list into runs; each run is AND-ed internally. Mirrors the SQL
+ * drivers' precedence so `a OR b AND c` means `a OR (b AND c)` everywhere.
+ */
+function combineWheres(wheres) {
+    const runs = []
+    for (const w of wheres) {
+        const cond = buildWhereCondition(w)
+        if (!cond) continue
+        if (w.boolean === 'or' || !runs.length) runs.push([cond])
+        else runs[runs.length - 1].push(cond)
     }
-
-    if (!conditions.length) return {}
-    if (conditions.length === 1) return conditions[0]
-    return { $and: conditions }
+    const parts = runs.map(r => (r.length === 1 ? r[0] : { $and: r }))
+    if (!parts.length) return {}
+    if (parts.length === 1) return parts[0]
+    return { $or: parts }
 }
 
 function buildWhereCondition(w) {
     switch (w.type) {
+        case 'group': {
+            const sub = combineWheres(w.wheres ?? [])
+            return Object.keys(sub).length ? sub : null
+        }
         case 'in': return { [w.column]: { $in: w.values ?? [] } }
         case 'notIn': return { [w.column]: { $nin: w.values ?? [] } }
         case 'null': return { [w.column]: { $eq: null } }

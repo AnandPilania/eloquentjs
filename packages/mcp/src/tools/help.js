@@ -818,7 +818,7 @@ export async function handleNlpQuery(args, ctx) {
   if (args.execute) {
     try {
       const { loadModelsByName } = await import('@eloquentjs/codegen/render')
-      const { resolveConfig }    = await import('../../../cli/src/utils.js')
+      const { resolveConfig }    = await import('@eloquentjs/cli/utils')
       const { resolve }          = await import('path')
       const cfg                  = resolveConfig(ctx)
       const dir                  = resolve(ctx.cwd, args.modelsDir ?? cfg.paths.models)

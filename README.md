@@ -12,9 +12,9 @@ const users = await User
   .paginate(1, 20)
 ```
 
-[![Tests](https://img.shields.io/badge/tests-737%20passing-brightgreen)](#)
-[![License](https://img.shields.io/badge/license-MIT-blue)](#)
-[![Node](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen)](#)
+[![Tests](https://img.shields.io/badge/tests-989%20passing-brightgreen)](#)
+[![License](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
+[![Node](https://img.shields.io/badge/node-%3E%3D20.6.0-brightgreen)](#)
 [![MCP](https://img.shields.io/badge/MCP-compatible-purple)](#)
 
 ---
@@ -162,7 +162,14 @@ HookRegistry.observe(User, new UserObserver())
 
 ```js
 import { createRealtimeServer } from '@eloquentjs/realtime'
-const rt = createRealtimeServer({ port: 6001 })
+
+// appKey/appSecret are required — private and presence channels are signed
+// with the secret, and a subscribe without a valid signature is rejected.
+const rt = createRealtimeServer({
+  port:      6001,
+  appKey:    process.env.ELOQUENT_APP_KEY,
+  appSecret: process.env.ELOQUENT_APP_SECRET,
+})
 rt.broadcastFrom(User)   // broadcasts User:created/updated/deleted
 ```
 
@@ -194,6 +201,7 @@ app.use('/api', apiRouter([
     with:        ['profile'],
     searchable:  ['name', 'email'],
     sortable:    ['name', 'created_at'],
+    filterable:  ['role', 'active'],        // opt-in: ?role=admin&active=1
     policy:      async (req, model, action) => action === 'destroy' ? req.user.is_admin : true,
   }),
   resource(Post, { only: ['index', 'show', 'store'] }),
@@ -245,6 +253,7 @@ eloquentjs/
 │   ├── codegen/       @eloquentjs/codegen
 │   ├── validator/     @eloquentjs/validator
 │   ├── pgsql/         @eloquentjs/pgsql
+│   ├── sqlite/        @eloquentjs/sqlite
 │   ├── mongodb/       @eloquentjs/mongodb
 │   ├── realtime/      @eloquentjs/realtime
 │   ├── graphql/       @eloquentjs/graphql
@@ -252,13 +261,14 @@ eloquentjs/
 │   ├── mcp/           @eloquentjs/mcp
 │   └── cli/           @eloquentjs/cli
 ├── tests/
-│   └── unit/          702 tests, 12 suites, all passing
+│   └── unit/          989 tests, 18 suites, all passing
 ├── agent-files/       CLAUDE.md, .cursorrules, skills/...
 ├── .github/
 │   └── workflows/     CI + Release automation
 ├── scripts/
 │   ├── release.js     Version bump + changelog
 │   ├── publish.js     npm publish orchestration
+│   ├── lint.js        Syntax check (node --check)
 │   └── check-versions.js  Version consistency check
 └── CHANGELOG.md
 ```
@@ -271,7 +281,8 @@ eloquentjs/
 git clone https://github.com/your-org/eloquentjs.git
 cd eloquentjs && npm install
 
-npm test                                           # run all 700 tests
+npm test                                           # run all 989 tests
+npm run lint                                       # syntax-check every source file
 npm run test:coverage                              # with coverage report
 npm test -- --testPathPattern=MCP                  # single suite
 npm run check:versions                             # verify all packages at same version
@@ -289,7 +300,34 @@ npm run release:minor    # 1.0.0 → 1.1.0
 npm run release:major    # 1.0.0 → 2.0.0
 npm run release:alpha    # 1.0.0 → 1.0.1-alpha.0
 npm run release:beta     # 1.0.0 → 1.0.1-beta.0
+npm run release:rc       # 1.0.0 → 1.0.1-rc.0
+npm run release:next     # 1.0.0 → 1.0.1-next.0
+npm run check:versions   # verify all 12 manifests agree
 npm run publish:all      # publish all 11 packages to npm
+```
+
+---
+
+## Writing a driver
+
+`@eloquentjs/core` never writes SQL — it builds a neutral context object and
+hands it to a **resolver**. Implement that one interface and Model, QueryBuilder,
+relations, Schema, factories and seeders all work unchanged.
+
+- **[The Resolver Contract](./packages/core/RESOLVER.md)** — the interface, the
+  query-context shape, every where type, and the dialect traps (OR precedence,
+  nested groups, column defaults).
+- **Conformance suite** — `@eloquentjs/core/testing` exports `describeResolverShape`
+  (no database; checks the interface is complete) and `describeResolverBehavior`
+  (needs a live database; checks it behaves). See
+  [tests/unit/ResolverConformance.test.js](./tests/unit/ResolverConformance.test.js)
+  for all three in-tree drivers wired up.
+
+```js
+import { describeResolverShape, describeResolverBehavior } from '@eloquentjs/core/testing'
+
+describeResolverShape('MyResolver', () => new MyResolver(fakeConnection()))
+describeResolverBehavior('MyResolver', { makeResolver, createTable })
 ```
 
 ---
@@ -305,4 +343,4 @@ npm run publish:all      # publish all 11 packages to npm
 
 ## License
 
-MIT © EloquentJS Contributors
+MIT © EloquentJS Contributors — see [LICENSE](./LICENSE)

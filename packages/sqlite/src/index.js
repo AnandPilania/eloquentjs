@@ -122,6 +122,27 @@ export class SQLiteResolver {
     return this.db.prepare(`SELECT * FROM ${quoteIdent(table)} WHERE rowid = ?`).get(result.lastInsertRowid)
   }
 
+  /**
+   * Multi-row INSERT. Columns are the union of all row keys; rows missing a
+   * key get NULL, so callers may pass heterogeneous objects.
+   * RETURNING needs SQLite 3.35+ — both better-sqlite3 and bun:sqlite ship newer.
+   */
+  async insertMany(table, rows) {
+    if (!Array.isArray(rows) || !rows.length) return []
+    const cols = [...new Set(rows.flatMap(r => Object.keys(r).filter(k => r[k] !== undefined)))]
+    if (!cols.length) throw new Error(`insertMany() called with empty rows on table "${table}"`)
+
+    const params = []
+    const tuples = rows.map(r => {
+      for (const c of cols) params.push(prepareValue(r[c] ?? null))
+      return `(${cols.map(() => '?').join(', ')})`
+    })
+
+    const sql = `INSERT INTO ${quoteIdent(table)} (${cols.map(quoteIdent).join(', ')}) `
+      + `VALUES ${tuples.join(', ')} RETURNING *`
+    return this.db.prepare(sql).all(...params)
+  }
+
   // ── UPDATE ─────────────────────────────────────────────────────────────────
   async update(table, conditions, data, ctx = null) {
     const entries = Object.entries(data).filter(([, v]) => v !== undefined)
@@ -491,6 +512,13 @@ function buildWhereClauses(ctx) {
       case 'jsonContains':
         clause = buildJsonContainsClause(w.column, w.value, push)
         break
+      case 'group': {
+        const sub = buildWhereClauses({ wheres: w.wheres, rawWheres: w.rawWheres })
+        if (!sub.clause) continue
+        whereParams.push(...sub.whereParams)
+        clause = `(${sub.clause})`
+        break
+      }
       default:
         clause = `${quoteIdent(w.column)} ${w.operator} ${push(w.value)}`
     }
@@ -743,10 +771,28 @@ function prepareValue(value) {
   return value
 }
 
+// Blueprint speaks Postgres for portable expression defaults; translate them.
+// SQLite has no uuid function, so build a v4 out of randomblob().
+const DEFAULT_EXPR_MAP = {
+  'gen_random_uuid()':
+    "(lower(hex(randomblob(4))||'-'||hex(randomblob(2))||'-4'||substr(hex(randomblob(2)),2)"
+    + "||'-'||substr('89ab',abs(random())%4+1,1)||substr(hex(randomblob(2)),2)"
+    + "||'-'||hex(randomblob(6))))",
+}
+
+/**
+ * Render a column default. Strings are quoted literals *unless* they are SQL:
+ * a function call or a bare keyword. SQLite requires non-constant defaults to
+ * be parenthesized — `DEFAULT foo()` is a syntax error, `DEFAULT (foo())` is not.
+ */
 function formatDefault(value) {
-  if (typeof value === 'string') return /^[A-Z_]+\(?.*\)?$/.test(value) ? value : `'${value.replace(/'/g, "''")}'`
   if (typeof value === 'boolean') return value ? '1' : '0'
-  return String(value)
+  if (typeof value !== 'string') return String(value)
+  if (DEFAULT_EXPR_MAP[value]) return DEFAULT_EXPR_MAP[value]
+  if (/^\(.*\)$/.test(value)) return value
+  if (/^[A-Za-z_][\w.]*\s*\(.*\)$/.test(value)) return `(${value})`
+  if (/^(CURRENT_(TIMESTAMP|DATE|TIME)|NULL|TRUE|FALSE)$/i.test(value)) return value
+  return `'${value.replace(/'/g, "''")}'`
 }
 
 function execSql(db, sql) {

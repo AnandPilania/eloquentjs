@@ -13,13 +13,21 @@ concurrency:
 jobs:
   # ────────────────────────────────────────────────────────────────────────────
   test:
-    name: Test (Node ${{ matrix.node }})
-    runs-on: ubuntu-latest
+    name: Test (${{ matrix.os }}, Node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
 
     strategy:
       fail-fast: false
       matrix:
-        node: ['18', '20', '22']
+        os: [ubuntu-latest]
+        node: ['20.6', '22', '24']
+        include:
+          # The repo is developed on Windows and sqlite depends on the native
+          # better-sqlite3 — both platforms need at least one leg.
+          - os: windows-latest
+            node: '22'
+          - os: macos-latest
+            node: '22'
 
     steps:
       - name: Checkout
@@ -35,14 +43,14 @@ jobs:
         run: npm ci
 
       - name: Run unit tests
-        run: node --experimental-vm-modules node_modules/.bin/jest tests/unit/ --no-coverage --ci
+        run: npm run test:ci
 
-      - name: Run tests with coverage (Node 20 only)
-        if: matrix.node == '20'
-        run: node --experimental-vm-modules node_modules/.bin/jest tests/unit/ --coverage --ci
+      - name: Run tests with coverage (Linux / Node 22 only)
+        if: matrix.os == 'ubuntu-latest' && matrix.node == '22'
+        run: npm run test:coverage -- --ci
 
       - name: Upload coverage
-        if: matrix.node == '20'
+        if: matrix.os == 'ubuntu-latest' && matrix.node == '22'
         uses: codecov/codecov-action@v4
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -58,17 +66,16 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: npm
 
       - run: npm ci
 
-      - name: Check for syntax errors
-        run: |
-          # Validate all JS files parse without errors
-          find packages/*/src -name "*.js" | while read f; do
-            node --input-type=module < "$f" 2>&1 | grep -v "^$" || true
-          done
+      # `node --check` parses without executing and exits non-zero on a syntax
+      # error. Piping a module to stdin (the previous approach) *ran* it and
+      # swallowed the exit code, so this job could never fail.
+      - name: Check every source file parses
+        run: npm run lint
 
       - name: Check package.json files are valid JSON
         run: |
@@ -86,7 +93,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Check all packages share the same version
         run: node scripts/check-versions.js
@@ -102,12 +109,9 @@ jobs:
     steps:
       - name: Check all jobs passed
         run: |
-          if [[ "${{ needs.test.result }}" != "success" ]]; then
-            echo "Tests failed"
-            exit 1
-          fi
-          if [[ "${{ needs.lint.result }}" != "success" ]]; then
-            echo "Lint failed"
-            exit 1
-          fi
+          failed=0
+          if [[ "${{ needs.test.result }}"           != "success" ]]; then echo "Tests failed";          failed=1; fi
+          if [[ "${{ needs.lint.result }}"           != "success" ]]; then echo "Lint failed";           failed=1; fi
+          if [[ "${{ needs.check-versions.result }}" != "success" ]]; then echo "Version check failed";  failed=1; fi
+          if [[ "$failed" == "1" ]]; then exit 1; fi
           echo "All CI jobs passed ✔"

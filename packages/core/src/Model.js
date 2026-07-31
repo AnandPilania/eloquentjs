@@ -49,7 +49,10 @@ const _rels = new WeakMap()
 const _exists = new WeakMap()
 const _trashed = new WeakMap()
 const SELF = Symbol('self')  // proxy[SELF] → raw instance
-let _unguarded = false
+
+// Classes with mass assignment disabled. Per-class, inherited down the chain:
+// Model.unguard() unguards everything, User.unguard() only User.
+const _unguardedClasses = new WeakSet()
 
 // Get the raw (non-proxy) instance for WeakMap keying.
 // Works whether `obj` is the proxy or the raw instance.
@@ -120,25 +123,35 @@ export class Model {
         return getResolver(this.connection)
     }
 
+    /**
+     * Disable mass-assignment protection for this class and its subclasses.
+     * ponytail: still shared state for the duration — in a request handler
+     * prefer unguarded(cb), which always restores.
+     */
     static unguard() {
-        _unguarded = true
+        _unguardedClasses.add(this)
+        return this
     }
 
     static reguard() {
-        _unguarded = false
+        _unguardedClasses.delete(this)
+        return this
     }
 
     static isUnguarded() {
-        return _unguarded
+        for (let k = this; k && k !== Function.prototype; k = Object.getPrototypeOf(k)) {
+            if (_unguardedClasses.has(k)) return true
+        }
+        return false
     }
 
     static async unguarded(callback) {
-        const wasUnguarded = _unguarded
-        _unguarded = true
+        const wasUnguarded = _unguardedClasses.has(this)
+        _unguardedClasses.add(this)
         try {
             return await callback()
         } finally {
-            _unguarded = wasUnguarded
+            if (!wasUnguarded) _unguardedClasses.delete(this)
         }
     }
 
@@ -251,8 +264,14 @@ export class Model {
     }
 
     static async insert(rows) {
-        // Bulk insert without model hydration — returns raw result
-        return this.getResolver().insert(this.getTable(), rows)
+        // Bulk insert without model hydration — returns raw rows
+        const resolver = this.getResolver()
+        if (!Array.isArray(rows)) return resolver.insert(this.getTable(), rows)
+        if (!rows.length) return []
+        if (typeof resolver.insertMany !== 'function') {
+            throw new Error(`${resolver.constructor.name} does not implement insertMany()`)
+        }
+        return resolver.insertMany(this.getTable(), rows)
     }
 
     static async updateOrCreate(conditions, values = {}) {

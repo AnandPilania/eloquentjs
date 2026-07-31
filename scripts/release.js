@@ -6,6 +6,8 @@
  *   node scripts/release.js major              → 1.0.0 → 2.0.0
  *   node scripts/release.js alpha              → 1.0.0 → 1.0.1-alpha.0
  *   node scripts/release.js beta               → 1.0.0 → 1.0.1-beta.0
+ *   node scripts/release.js rc                 → 1.0.0 → 1.0.1-rc.0
+ *   node scripts/release.js next               → 1.0.0 → 1.0.1-next.0
  *   node scripts/release.js alpha --preminc    → 1.0.1-alpha.0 → 1.0.1-alpha.1
  *   node scripts/release.js 2.1.0              → explicit version
  *
@@ -64,8 +66,9 @@ const preInc = args.includes('--preminc')
 
 // ─── Version helpers ──────────────────────────────────────────────────────────
 function parseVersion(v) {
-    // Handles: 1.2.3, 1.2.3-alpha.0, 1.2.3-beta.2
-    const match = v.match(/^(\d+)\.(\d+)\.(\d+)(?:-(alpha|beta)\.(\d+))?$/)
+    // Handles: 1.2.3, 1.2.3-alpha.0, 1.2.3-beta.2, 1.2.3-rc.1, 1.2.3-next.0
+    // Keep the channel list in sync with distTagFor() in scripts/publish.js.
+    const match = v.match(/^(\d+)\.(\d+)\.(\d+)(?:-(alpha|beta|rc|next)\.(\d+))?$/)
     if (!match) error(`Cannot parse version: ${v}`)
     return {
         major: parseInt(match[1]),
@@ -85,8 +88,10 @@ function formatVersion({ major, minor, patch, pre, preN }) {
 function bumpVersion(current, bump) {
     const v = parseVersion(current)
 
+    const CHANNELS = ['alpha', 'beta', 'rc', 'next']
+
     // Explicit version string
-    if (/^\d+\.\d+\.\d+/.test(bump) && bump !== 'alpha' && bump !== 'beta') {
+    if (/^\d+\.\d+\.\d+/.test(bump) && !CHANNELS.includes(bump)) {
         return bump
     }
 
@@ -106,6 +111,8 @@ function bumpVersion(current, bump) {
 
         case 'alpha':
         case 'beta':
+        case 'rc':
+        case 'next':
             if (v.pre === bump && preInc) {
                 // Increment pre-release number: alpha.0 → alpha.1
                 return formatVersion({ ...v, preN: v.preN + 1 })
@@ -119,7 +126,7 @@ function bumpVersion(current, bump) {
             return formatVersion({ major: v.major, minor: v.minor, patch: nextPatch, pre: bump, preN: 0 })
 
         default:
-            error(`Unknown bump type: ${bump}. Use: patch, minor, major, alpha, beta, or an explicit version.`)
+            error(`Unknown bump type: ${bump}. Use: patch, minor, major, ${CHANNELS.join(', ')}, or an explicit version.`)
     }
 }
 

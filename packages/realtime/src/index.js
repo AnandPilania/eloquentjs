@@ -37,6 +37,13 @@ export function createRealtimeServer(options = {}) {
     return new RealtimeServer(options)
 }
 
+/** Constant-time string compare — length mismatch short-circuits (length is not secret). */
+function timingSafeEqualStr(a, b) {
+    const ab = Buffer.from(String(a))
+    const bb = Buffer.from(String(b))
+    return ab.length === bb.length && crypto.timingSafeEqual(ab, bb)
+}
+
 class RealtimeServer {
     constructor({
         port = 6001,
@@ -157,10 +164,12 @@ class RealtimeServer {
         const isPrivate = channel.startsWith('private-')
         const isPresence = channel.startsWith('presence-')
 
-        // Auth check for private/presence
-        if ((isPrivate || isPresence) && auth) {
+        // Private/presence channels REQUIRE a valid signature. A missing `auth`
+        // is a rejection, not a skipped check — omitting the field used to
+        // subscribe anyone to any private channel.
+        if (isPrivate || isPresence) {
             const expected = this._signChannel(ws.socketId, channel)
-            if (auth !== expected) {
+            if (!auth || !timingSafeEqualStr(auth, expected)) {
                 ws.send(JSON.stringify({ event: 'pusher:error', data: { message: 'Forbidden', code: 4009 } }))
                 return
             }

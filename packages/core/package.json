@@ -5,7 +5,8 @@
   "type": "module",
   "main": "src/index.js",
   "exports": {
-    ".": "./src/index.js"
+    ".": "./src/index.js",
+    "./testing": "./src/testing/conformance.js"
   },
   "keywords": [
     "orm",
@@ -25,5 +26,13 @@
   "bugs": {
     "url": "https://github.com/AnandPilania/eloquentjs/issues"
   },
-  "homepage": "https://github.com/AnandPilania/eloquentjs#readme"
+  "homepage": "https://github.com/AnandPilania/eloquentjs#readme",
+  "engines": {
+    "node": ">=20.6.0"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "RESOLVER.md"
+  ]
 }

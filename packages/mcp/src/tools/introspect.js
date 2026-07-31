@@ -174,7 +174,7 @@ export async function handleDescribeModel(args, ctx) {
 }
 
 export async function handleListMigrations(args, ctx) {
-  const { scanMigrations, resolveConfig } = await import('../../../cli/src/utils.js')
+  const { scanMigrations, resolveConfig } = await import('@eloquentjs/cli/utils')
   const cfg = resolveConfig(ctx)
   const dir = args.migrationsDir
     ? resolve(args.migrationsDir)
@@ -185,7 +185,7 @@ export async function handleListMigrations(args, ctx) {
   // Try to read run status from DB
   let ranMap = new Map()
   try {
-    const conn = await (await import('../../../cli/src/utils.js')).loadConnection(ctx)
+    const conn = await (await import('@eloquentjs/cli/utils')).loadConnection(ctx)
     const rows = await conn.raw('SELECT migration, batch, ran_at FROM _migrations ORDER BY id ASC').catch(() => [])
     const data = rows.rows ?? rows
     for (const r of data) ranMap.set(r.migration, { batch: r.batch, ranAt: r.ran_at })
@@ -207,7 +207,7 @@ export async function handleListMigrations(args, ctx) {
 }
 
 export async function handleDescribeDatabaseSchema(args, ctx) {
-  const { loadConnection } = await import('../../../cli/src/utils.js')
+  const { loadConnection } = await import('@eloquentjs/cli/utils')
   const conn = await loadConnection(ctx)
 
   if (args.table) {
@@ -260,7 +260,7 @@ export async function handleDescribeDatabaseSchema(args, ctx) {
 }
 
 export async function handleGetProjectStructure(args, ctx) {
-  const { resolveConfig } = await import('../../../cli/src/utils.js')
+  const { resolveConfig } = await import('@eloquentjs/cli/utils')
   const cfg = resolveConfig(ctx)
 
   const count = (dir) => {

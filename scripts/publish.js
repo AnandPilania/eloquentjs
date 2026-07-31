@@ -31,8 +31,8 @@ const PUBLISH_ORDER = [
     { name: '@eloquentjs/realtime', dir: 'packages/realtime' },
     { name: '@eloquentjs/graphql', dir: 'packages/graphql' },
     { name: '@eloquentjs/api', dir: 'packages/api' },
-    { name: '@eloquentjs/mcp', dir: 'packages/mcp' },
     { name: '@eloquentjs/cli', dir: 'packages/cli' },
+    { name: '@eloquentjs/mcp', dir: 'packages/mcp' },   // depends on cli
 ]
 
 // ─── Colors ───────────────────────────────────────────────────────────────────

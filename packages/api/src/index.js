@@ -39,6 +39,13 @@
  *   etc.
  */
 
+import {
+  ModelNotFoundException,
+  ValidationException,
+  PolicyException,
+  toSnakePlural,
+} from '@eloquentjs/core'
+
 export function resource(ModelClass, options = {}) {
   return { ModelClass, options }
 }
@@ -71,6 +78,7 @@ function buildExpressRouter(ModelClass, options = {}) {
     transform = null,          // transform response: (model, action) => {}
     policy = null,             // policy: async (req, model, action) => bool
     filters = null,            // custom filter fn: (qb, query) => void
+    filterable = [],           // columns exposed to ?column=value (opt-in)
     searchable = [],           // auto-adds ?search= support
     sortable = [],             // allowed sort columns
     softDeletes = ModelClass.softDeletes,
@@ -78,9 +86,9 @@ function buildExpressRouter(ModelClass, options = {}) {
 
   const allowed = new Set(only.filter(a => !except.includes(a)))
 
-  const basePath = toKebab(ModelClass.name) + 's'
+  const basePath = routePath(ModelClass.name)
   const prefix = nested
-    ? `/${toKebab(nested.parent.name)}s`
+    ? `/${routePath(nested.parent.name)}`
     : `/${basePath}`
 
   const handle = async (req, res, next) => {
@@ -100,7 +108,7 @@ function buildExpressRouter(ModelClass, options = {}) {
 
       // ROUTE MATCHING
       if (!id && method === 'get' && allowed.has('index')) {
-        result = await handleIndex(ModelClass, req, { withs, paginate, filters, searchable, sortable, nested, parentId })
+        result = await handleIndex(ModelClass, req, { withs, paginate, filters, filterable, searchable, sortable, nested, parentId })
       } else if (!id && method === 'post' && allowed.has('store')) {
         result = await handleStore(ModelClass, req, { nested, parentId, policy })
       } else if (id === 'trashed' && method === 'get' && softDeletes) {
@@ -138,7 +146,7 @@ function buildExpressRouter(ModelClass, options = {}) {
 
 // ─── Route Handlers ───────────────────────────────────────────────────────────
 
-async function handleIndex(ModelClass, req, { withs, paginate, filters, searchable, sortable, nested, parentId }) {
+async function handleIndex(ModelClass, req, { withs, paginate, filters, filterable, searchable, sortable, nested, parentId }) {
   const query = req.query
   const page = parseInt(query[paginate.page] ?? 1)
   const perPage = Math.min(parseInt(query[paginate.perPage] ?? paginate.defaultPerPage), paginate.maxPerPage ?? 100)
@@ -159,16 +167,17 @@ async function handleIndex(ModelClass, req, { withs, paginate, filters, searchab
     })
   }
 
-  // Filters (auto-apply ?field=value for whitelisted fields)
+  // Filters — ?field=value only for columns explicitly listed in `filterable`.
+  // Opt-in on purpose: filtering on any param let clients probe hidden columns
+  // (?password_reset_token=…) and use the row count as an oracle.
   if (filters) {
     await filters(qb, query)
-  } else {
-    // Auto-filter: ?field=value for any query param
-    const reservedParams = new Set(['page', paginate.page, paginate.perPage, 'search', 'sort', 'order', 'with'])
-    for (const [key, value] of Object.entries(query)) {
-      if (!reservedParams.has(key) && value !== '') {
-        qb = qb.where(key, value)
-      }
+  } else if (filterable.length) {
+    const hidden = new Set(ModelClass.hidden ?? [])
+    for (const key of filterable) {
+      const value = query[key]
+      if (value === undefined || value === '' || hidden.has(key)) continue
+      qb = qb.where(key, value)
     }
   }
 
@@ -284,7 +293,7 @@ export async function fastifyPlugin(fastify, options = {}) {
 
 function registerFastifyRoutes(fastify, ModelClass, options = {}) {
   const { prefix = '/api', only = ['index','show','store','update','destroy'], except = [], withs = [] } = options
-  const base = `${prefix}/${toKebab(ModelClass.name)}s`
+  const base = `${prefix}/${routePath(ModelClass.name)}`
 
   const allowed = new Set(only.filter(a => !except.includes(a)))
 
@@ -335,7 +344,7 @@ function extractParams(path, prefix, basePath, nested) {
 
   if (nested) {
     // /posts/:postId/comments/:id
-    const parentSegment = toKebab(nested.parent.name) + 's'
+    const parentSegment = routePath(nested.parent.name)
     const idx = segments.indexOf(parentSegment)
     if (idx === -1) return null
     return { parentId: segments[idx + 1], id: segments[idx + 3] }
@@ -354,18 +363,10 @@ function serialize(data) {
   return data?.toJSON?.() ?? data
 }
 
-function toKebab(name) {
-  return name.replace(/([A-Z])/g, '-$1').toLowerCase().replace(/^-/, '')
-}
-
-class ModelNotFoundException extends Error {
-  constructor(msg) { super(msg); this.name = 'ModelNotFoundException' }
-}
-
-class PolicyException extends Error {
-  constructor(msg) { super(msg); this.name = 'PolicyException' }
-}
-
-class ValidationException extends Error {
-  constructor(errors) { super('Validation failed'); this.name = 'ValidationException'; this.errors = errors }
+/**
+ * Model class name → URL path segment. Pluralization comes from core so
+ * routes, table names and generated migrations agree (Category → categories).
+ */
+function routePath(name) {
+  return toSnakePlural(name).replace(/_/g, '-')
 }

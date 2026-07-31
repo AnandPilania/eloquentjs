@@ -139,6 +139,26 @@ export class PgResolver {
         return result.rows[0]
     }
 
+    /**
+     * Multi-row INSERT. Columns are the union of all row keys; rows missing a
+     * key get NULL, so callers may pass heterogeneous objects.
+     */
+    async insertMany(table, rows) {
+        if (!Array.isArray(rows) || !rows.length) return []
+        const cols = [...new Set(rows.flatMap(r => Object.keys(r).filter(k => r[k] !== undefined)))]
+        if (!cols.length) throw new Error(`insertMany() called with empty rows on table "${table}"`)
+
+        const params = []
+        const tuples = rows.map(r =>
+            `(${cols.map(c => { params.push(r[c] ?? null); return `$${params.length}` }).join(', ')})`
+        )
+
+        const sql = `INSERT INTO ${quoteIdent(table)} (${cols.map(quoteIdent).join(', ')}) `
+            + `VALUES ${tuples.join(', ')} RETURNING *`
+        const result = await this.pool.query(sql, params)
+        return result.rows
+    }
+
     // ── UPDATE ──────────────────────────────────────────────────────────────────
     /**
      * @param {string}  table
@@ -410,8 +430,6 @@ function quoteIdent(name) {
 function buildSelect(table, ctx) {
     const params = []
 
-    const push = (v) => { params.push(v); return `$${params.length}` }
-
     // ── SELECT clause ────────────────────────────────────────────────────────
     const selects = (ctx.selects ?? ['*']).map(s => {
         if (typeof s === 'object' && s.raw) return s.raw
@@ -443,11 +461,12 @@ function buildSelect(table, ctx) {
         sql += ` GROUP BY ${ctx.groupBys.map(quoteIdent).join(', ')}`
     }
 
-    // ── HAVING ───────────────────────────────────────────────────────────────
-    for (const h of ctx.havings ?? []) {
+    // ── HAVING — one clause, conditions AND-ed ───────────────────────────────
+    const havingParts = (ctx.havings ?? []).map(h => {
         params.push(h.value)
-        sql += ` HAVING ${quoteIdent(h.column)} ${h.operator} $${params.length}`
-    }
+        return `${quoteIdent(h.column)} ${h.operator} $${params.length}`
+    })
+    if (havingParts.length) sql += ` HAVING ${havingParts.join(' AND ')}`
 
     // ── ORDER BY — all clauses in ONE ORDER BY, comma-separated ──────────────
     const orderParts = (ctx.orderBys ?? []).map(o => {
@@ -520,6 +539,16 @@ function buildWhereClauses(ctx, startOffset) {
             case 'jsonContains':
                 clause = `${quoteIdent(w.column)} @> ${push(JSON.stringify(w.value))}::jsonb`
                 break
+            case 'group': {
+                const sub = buildWhereClauses(
+                    { wheres: w.wheres, rawWheres: w.rawWheres },
+                    startOffset + whereParams.length
+                )
+                if (!sub.clause) continue
+                whereParams.push(...sub.whereParams)
+                clause = `(${sub.clause})`
+                break
+            }
             default:
                 clause = `${quoteIdent(w.column)} ${w.operator} ${push(w.value)}`
         }
@@ -600,13 +629,25 @@ function colToSQL(col) {
     if (!col._nullable && !col.primaryKey && !isAutoSerial) def += ' NOT NULL'
 
     if (col._default !== undefined && col._default !== null) {
-        const dv = typeof col._default === 'string' ? col._default : `'${col._default}'`
-        def += ` DEFAULT ${dv}`
+        def += ` DEFAULT ${formatDefault(col._default)}`
     }
 
     if (col._unique) def += ' UNIQUE'
 
     return def
+}
+
+/**
+ * Render a column default. String values are quoted literals *unless* they
+ * look like SQL — a function call (`gen_random_uuid()`, which Blueprint.uuid()
+ * emits) or a bare SQL keyword.
+ */
+function formatDefault(value) {
+    if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE'
+    if (typeof value !== 'string') return String(value)
+    if (/^[A-Za-z_][\w.]*\s*\(.*\)$/.test(value)) return value
+    if (/^(CURRENT_(TIMESTAMP|DATE|TIME)|NULL|TRUE|FALSE)$/i.test(value)) return value
+    return `'${value.replace(/'/g, "''")}'`
 }
 
 // ─── Pivot helpers ────────────────────────────────────────────────────────────

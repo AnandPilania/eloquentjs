@@ -11,6 +11,7 @@ async function sync() {
         bugs: rootPkg.bugs,
         homepage: rootPkg.homepage,
         version: rootPkg.version,
+        engines: rootPkg.engines,
     };
 
     const packagePaths = await glob('packages/*/package.json');

@@ -13,7 +13,7 @@
 import { resolve } from 'path'
 import { existsSync } from 'fs'
 import { pathToFileURL } from 'node:url'
-import { colors, success, info, warn, error, scanMigrations, resolveConfig, loadConnection } from '../utils.js'
+import { colors, success, info, warn, error, scanMigrations, resolveConfig, loadConnection, normalizeDriver } from '../utils.js'
 
 // ─── Driver guard ─────────────────────────────────────────────────────────
 function getDriver(ctx) {

@@ -123,7 +123,7 @@ jobs:
         run: |
           VERSION="${{ needs.validate.outputs.version }}"
           TAG="${{ needs.validate.outputs.dist_tag }}"
-          PACKAGES=(core pgsql mongodb realtime graphql api cli)
+          PACKAGES=(core codegen validator pgsql sqlite mongodb realtime graphql api cli mcp)
           for pkg in "${PACKAGES[@]}"; do
             echo -n "Checking @eloquentjs/$pkg@$VERSION ... "
             npm view "@eloquentjs/$pkg@$VERSION" version 2>/dev/null && echo "✔" || echo "⚠ not found yet (may take a moment)"

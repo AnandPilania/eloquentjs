@@ -5,11 +5,12 @@
  * Transports: stdio (default), SSE (HTTP) via --http flag.
  *
  * Capabilities:
- *   Tools (16):     introspect, generate, query, execute
+ *   Tools (21):     introspect, generate, query, execute, help/nlp
  *   Resources (3):  eloquentjs://schema, models, config
  *   Prompts (3):    scaffold_feature, debug_query, review_migrations
  */
 
+import { readFileSync } from 'node:fs'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import {
@@ -40,7 +41,10 @@ import {
 } from './tools/help.js'
 
 const SERVER_NAME = 'eloquentjs'
-const SERVER_VERSION = '0.0.2'
+// Read from our own package.json so it never drifts (it had been pinned at 0.0.2).
+const SERVER_VERSION = JSON.parse(
+    readFileSync(new URL('../package.json', import.meta.url), 'utf8')
+).version
 
 // ─── RESOURCES ────────────────────────────────────────────────────────────────
 const RESOURCES = [

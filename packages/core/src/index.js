@@ -11,6 +11,7 @@ export {
     ModelNotFoundException,
     MassAssignmentException,
     ValidationException,
+    PolicyException,
     RelationNotFoundException
 } from './errors.js'
 

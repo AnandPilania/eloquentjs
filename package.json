@@ -39,39 +39,39 @@
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand --detectOpenHandles --forceExit",
     "test:unit": "node --experimental-vm-modules node_modules/jest/bin/jest.js tests/unit --runInBand --forceExit",
     "test:coverage": "node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage --runInBand --forceExit",
+    "test:ci": "node --experimental-vm-modules node_modules/jest/bin/jest.js tests/unit --ci --runInBand --forceExit --no-coverage",
+    "lint": "node scripts/lint.js",
     "build": "echo 'ESM — no build step needed'",
     "eloquent": "node packages/cli/bin/eloquent.js",
-    "changeset": "changeset",
     "sync": "node scripts/sync-metadata.js",
-    "version-packages": "changeset version && npm run sync && npm install",
     "clean": "npm run clean:workspaces && rimraf node_modules",
     "clean:workspaces": "npm exec --workspaces -- rimraf node_modules dist",
-    "release": "npm run test && npm run version-packages && changeset publish",
-    "release:dry-run": "npm run test && changeset version && npm run sync && changeset publish --dry-run",
     "release:patch": "node scripts/release.js patch",
     "release:minor": "node scripts/release.js minor",
     "release:major": "node scripts/release.js major",
     "release:alpha": "node scripts/release.js alpha",
     "release:beta": "node scripts/release.js beta",
+    "release:rc": "node scripts/release.js rc",
+    "release:next": "node scripts/release.js next",
     "release:dry": "node scripts/release.js patch --dry-run",
     "publish:all": "node scripts/publish.js",
     "publish:alpha": "node scripts/publish.js --tag=alpha",
     "publish:beta": "node scripts/publish.js --tag=beta",
     "publish:dry": "node scripts/publish.js --dry-run",
-    "publish:canary": "changeset version --snapshot canary && changeset publish --tag canary",
     "check:versions": "node scripts/check-versions.js",
     "prerelease:alpha": "node scripts/release.js alpha --preminc",
     "prerelease:beta": "node scripts/release.js beta --preminc"
   },
   "devDependencies": {
-    "@changesets/cli": "^2.27.1",
     "@faker-js/faker": "^8.4.1",
-    "cross-env": "^10.1.0",
     "glob": "^10.5.0",
     "jest": "^29.7.0",
     "rimraf": "^6.0.1"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1"
+  },
+  "engines": {
+    "node": ">=20.6.0"
   }
 }

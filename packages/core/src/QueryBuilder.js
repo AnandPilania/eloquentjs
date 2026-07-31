@@ -33,6 +33,8 @@ export class QueryBuilder {
 
   // ─── WHERE ───────────────────────────────────────────────────────────────────
   where(column, operator, value) {
+    // where(qb => ...) nested group
+    if (typeof column === 'function') return this._whereGroup(column, 'and')
     // where({ key: val, ... }) object shorthand
     if (column !== null && typeof column === 'object' && !Array.isArray(column)) {
       for (const [k, v] of Object.entries(column)) {
@@ -47,8 +49,27 @@ export class QueryBuilder {
   }
 
   orWhere(column, operator, value) {
+    if (typeof column === 'function') return this._whereGroup(column, 'or')
+    if (column !== null && typeof column === 'object' && !Array.isArray(column)) {
+      return this._whereGroup(qb => qb.where(column), 'or')
+    }
     if (value === undefined) { value = operator; operator = '=' }
     this._wheres.push({ column, operator: operator.toUpperCase(), value, boolean: 'or' })
+    return this
+  }
+
+  /**
+   * Collect the wheres a callback registers into one parenthesized group.
+   * The sub-builder gets no global scopes — Model.query() only applies those
+   * to the outer builder, which is what keeps `(a OR b)` from leaking past
+   * the soft-delete filter.
+   */
+  _whereGroup(fn, boolean) {
+    const sub = new QueryBuilder(this._model, this._resolver)
+    fn(sub)
+    if (sub._wheres.length || sub._rawWheres.length) {
+      this._wheres.push({ type: 'group', wheres: sub._wheres, rawWheres: sub._rawWheres, boolean })
+    }
     return this
   }
 
@@ -341,9 +362,23 @@ export class QueryBuilder {
   }
 
   // ─── BUILD CONTEXT ───────────────────────────────────────────────────────────
+  /**
+   * Global scopes (soft deletes, Model.addGlobalScope) must AND against the
+   * *whole* user query. Left flat, `scope AND a OR b` parses as
+   * `(scope AND a) OR b` and returns rows the scope excluded — so wrap the
+   * user wheres in a group as soon as one of them is an OR.
+   */
+  _scopedWheres() {
+    const user = this._wheres.filter(w => !w._scope)
+    if (!user.some(w => w.boolean === 'or')) return this._wheres
+    const scoped = this._wheres.filter(w => w._scope)
+    if (!scoped.length) return this._wheres
+    return [...scoped, { type: 'group', wheres: user, boolean: 'and' }]
+  }
+
   _buildContext() {
     return {
-      wheres:    this._wheres,
+      wheres:    this._scopedWheres(),
       rawWheres: this._rawWheres,
       selects:   this._selects,
       joins:     this._joins,

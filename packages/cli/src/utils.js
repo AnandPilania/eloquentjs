@@ -65,36 +65,9 @@ export function readFile(path) {
 }
 
 // ─── Name helpers ──────────────────────────────────────────────────────────
-export function toPascalCase(str) {
-    return str
-        .replace(/[-_](.)/g, (_, c) => c.toUpperCase())
-        .replace(/^(.)/, (_, c) => c.toUpperCase())
-}
-
-export function toCamelCase(str) {
-    const pascal = toPascalCase(str)
-    return pascal[0].toLowerCase() + pascal.slice(1)
-}
-
-export function toSnakeCase(str) {
-    return str
-        .replace(/([A-Z])/g, '_$1')
-        .toLowerCase()
-        .replace(/^_/, '')
-        .replace(/[-\s]+/g, '_')
-}
-
-export function toKebabCase(str) {
-    return toSnakeCase(str).replace(/_/g, '-')
-}
-
-export function toTableName(modelName) {
-    // Simple pluralization: User → users, Category → categories
-    const snake = toSnakeCase(modelName)
-    if (snake.endsWith('y')) return snake.slice(0, -1) + 'ies'
-    if (snake.endsWith('s') || snake.endsWith('x') || snake.endsWith('z') || snake.endsWith('ch') || snake.endsWith('sh')) return snake + 'es'
-    return snake + 's'
-}
+// Re-exported from core, not re-implemented: a scaffolded migration must create
+// the same table name the Model resolves at runtime.
+export { toPascalCase, toCamelCase, toSnakeCase, toKebabCase, toSnakePlural as toTableName } from '@eloquentjs/core'
 
 // ─── Migration timestamp ────────────────────────────────────────────────────
 export function migrationTimestamp() {

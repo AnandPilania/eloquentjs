@@ -26,6 +26,7 @@
   "dependencies": {
     "@eloquentjs/core": "^0.0.4",
     "@eloquentjs/codegen": "^0.0.4",
+    "@eloquentjs/cli": "^0.0.4",
     "@modelcontextprotocol/sdk": "^1.27.1"
   },
   "author": {
@@ -39,5 +40,13 @@
   "bugs": {
     "url": "https://github.com/AnandPilania/eloquentjs/issues"
   },
-  "homepage": "https://github.com/AnandPilania/eloquentjs#readme"
+  "homepage": "https://github.com/AnandPilania/eloquentjs#readme",
+  "engines": {
+    "node": ">=20.6.0"
+  },
+  "files": [
+    "src",
+    "bin",
+    "README.md"
+  ]
 }

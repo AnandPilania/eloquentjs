@@ -12,14 +12,14 @@ Pushing a `v*` tag triggers the GitHub Actions release workflow which:
 
 1. Runs the full test suite
 2. Validates the version matches the tag
-3. Publishes all 7 packages to npm in dependency order
+3. Publishes all 11 packages to npm in dependency order
 4. Creates a GitHub Release with the changelog entry
 
 ---
 
 ## Prerequisites
 
-- Node.js 18+
+- Node.js 20.6+
 - npm access to the `@eloquentjs` org: `npm login`
 - Push access to the repo
 - `NPM_TOKEN` secret set in GitHub → Settings → Secrets → Actions
@@ -35,7 +35,14 @@ Pushing a `v*` tag triggers the GitHub Actions release workflow which:
 | `npm run release:major` | `1.0.0 → 2.0.0` | Breaking changes |
 | `npm run release:alpha` | `1.0.0 → 1.0.1-alpha.0` | Early preview, may break |
 | `npm run release:beta` | `1.0.0 → 1.0.1-beta.0` | Feature-complete, final testing |
+| `npm run release:rc` | `1.0.0 → 1.0.1-rc.0` | Release candidate |
+| `npm run release:next` | `1.0.0 → 1.0.1-next.0` | Rolling `next` channel |
 | `npm run release:alpha -- --preminc` | `1.0.1-alpha.0 → 1.0.1-alpha.1` | Iterate on same pre-release |
+
+Versioning is **lockstep** — every package always carries the same version,
+enforced by `npm run check:versions` in CI. There is deliberately no
+independent-versioning tool (Changesets was removed because its config
+contradicted this).
 
 ---
 
@@ -69,7 +76,7 @@ npm run release:patch
 
 This will:
 - Run all tests (fails and exits if any fail)
-- Bump the version in all 8 `package.json` files
+- Bump the version in all 12 `package.json` files (root + 11 packages)
 - Update `CHANGELOG.md` with commits since the last tag
 - Create a git commit: `chore(release): 1.0.1`
 - Create an annotated git tag: `v1.0.1`
@@ -111,9 +118,9 @@ npm install @eloquentjs/core@latest
 
 ---
 
-## Step-by-Step: Pre-Release (Alpha / Beta)
+## Step-by-Step: Pre-Release (alpha / beta / rc / next)
 
-Pre-releases are published under a dist-tag (`alpha` or `beta`) so they
+Pre-releases are published under a dist-tag (`alpha`, `beta`, `rc` or `next`) so they
 don't affect users who run `npm install @eloquentjs/core`.
 
 ```bash

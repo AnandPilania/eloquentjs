@@ -9,6 +9,8 @@
  *   - Plain descriptor objects (for CLI scaffold generation where no DB exists yet)
  */
 
+import { toSnakePlural } from '@eloquentjs/core'
+
 // ─── Cast → canonical type map ────────────────────────────────────────────────
 const CAST_TYPE_MAP = {
   // integers
@@ -118,7 +120,7 @@ export function introspect(source) {
 
   const ModelClass = source
   const name   = ModelClass.name
-  const table  = ModelClass.table ?? toSnakeCase(name) + 's'
+  const table  = ModelClass.table ?? toSnakePlural(name)
   const pk     = ModelClass.primaryKey ?? 'id'
   const casts  = ModelClass.casts ?? {}
   const hidden = new Set(ModelClass.hidden ?? [])
@@ -232,7 +234,7 @@ export function introspectAll(models) {
  */
 function normalizeDescriptor(desc) {
   const name   = desc.name ?? 'Unknown'
-  const table  = desc.table ?? toSnakeCase(name) + 's'
+  const table  = desc.table ?? toSnakePlural(name)
   const casts  = desc.casts ?? {}
   const hidden = new Set(desc.hidden ?? [])
   const fill   = desc.fillable ?? []
@@ -275,9 +277,5 @@ function normalizeDescriptor(desc) {
   }
 }
 
-// ─── Utility ──────────────────────────────────────────────────────────────────
-function toSnakeCase(str) {
-  return str.replace(/([A-Z])/g, '_$1').toLowerCase().replace(/^_/, '')
-}
 
 export { resolveCastType, CAST_TYPE_MAP, DEFAULT_TYPE, ID_TYPE }

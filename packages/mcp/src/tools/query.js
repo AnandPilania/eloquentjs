@@ -81,7 +81,7 @@ export const queryTools = [
 // ─── Tool handlers ────────────────────────────────────────────────────────────
 
 export async function handleQueryModel(args, ctx) {
-  const { resolveConfig } = await import('../../../cli/src/utils.js')
+  const { resolveConfig } = await import('@eloquentjs/cli/utils')
   const cfg = resolveConfig(ctx)
   const dir = resolve_dir(ctx.cwd, args.modelsDir ?? cfg.paths.models)
 
@@ -128,7 +128,7 @@ export async function handleRunRawQuery(args, ctx) {
     throw new Error('Only SELECT, WITH, and EXPLAIN queries are allowed for safety. Use run_migrations for schema changes.')
   }
 
-  const { loadConnection } = await import('../../../cli/src/utils.js')
+  const { loadConnection } = await import('@eloquentjs/cli/utils')
   const conn = await loadConnection(ctx)
   const rows = await conn.raw(args.sql, args.params ?? [])
   const data = rows.rows ?? rows
@@ -139,7 +139,7 @@ export async function handleRunRawQuery(args, ctx) {
 export async function handleRunMigrations(args, ctx) {
   if (args.dryRun) {
     // List pending without running
-    const { scanMigrations, resolveConfig, loadConnection } = await import('../../../cli/src/utils.js')
+    const { scanMigrations, resolveConfig, loadConnection } = await import('@eloquentjs/cli/utils')
     const cfg = resolveConfig(ctx)
     const { resolve } = await import('path')
     const migrationsDir = resolve(ctx.cwd, cfg.paths.migrations)
@@ -163,19 +163,19 @@ export async function handleRunMigrations(args, ctx) {
   }
 
   // Actually run migrations
-  const { runMigrations } = await import('../../../cli/src/commands/migration-runner.js')
+  const { runMigrations } = await import('@eloquentjs/cli/migration-runner')
   const { ran, batch } = await runMigrations(ctx)
   return { ran, batch, message: ran > 0 ? `Ran ${ran} migration(s) (batch ${batch}).` : 'Nothing to migrate.' }
 }
 
 export async function handleRollbackMigration(args, ctx) {
-  const { rollbackMigrations } = await import('../../../cli/src/commands/migration-runner.js')
+  const { rollbackMigrations } = await import('@eloquentjs/cli/migration-runner')
   const { rolledBack } = await rollbackMigrations(ctx, { step: args.step ?? 1 })
   return { rolledBack, message: `Rolled back ${rolledBack} migration(s).` }
 }
 
 export async function handleMigrationStatus(args, ctx) {
-  const { getMigrationStatus } = await import('../../../cli/src/commands/migration-runner.js')
+  const { getMigrationStatus } = await import('@eloquentjs/cli/migration-runner')
   const migrations = await getMigrationStatus(ctx)
   return {
     migrations,
@@ -188,7 +188,7 @@ export async function handleMigrationStatus(args, ctx) {
 }
 
 export async function handleRunSeeder(args, ctx) {
-  const { resolveConfig, loadConnection } = await import('../../../cli/src/utils.js')
+  const { resolveConfig, loadConnection } = await import('@eloquentjs/cli/utils')
   const { resolve } = await import('path')
   const { pathToFileURL } = await import('node:url')
   const cfg        = resolveConfig(ctx)
@@ -206,10 +206,4 @@ export async function handleRunSeeder(args, ctx) {
   await seeder.run()
 
   return { seeder: className, message: `${className} completed successfully.` }
-}
-
-// ─── Util ─────────────────────────────────────────────────────────────────────
-function resolve_dir(cwd, path) {
-  const { resolve } = require
-  return path.startsWith('/') ? path : `${cwd}/${path}`
 }

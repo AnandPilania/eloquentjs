@@ -394,3 +394,152 @@ describe('Identifier quoting', () => {
     expect(s).toContain('"posts"."user_id"')
   })
 })
+
+// ─── Nested where groups ──────────────────────────────────────────────────────
+describe('Nested where groups', () => {
+  test('group is parenthesized and params keep numbering', async () => {
+    const { sql: s, params } = await sql('users', {
+      selects: ['*'],
+      wheres: [
+        { type: 'null', column: 'deleted_at', boolean: 'and' },
+        { type: 'group', boolean: 'and', wheres: [
+          { column: 'name', operator: 'LIKE', value: '%a%', boolean: 'and' },
+          { column: 'email', operator: 'LIKE', value: '%a%', boolean: 'or' },
+        ] },
+      ],
+    })
+    expect(s).toBe(
+      'SELECT * FROM "users" WHERE "deleted_at" IS NULL '
+      + 'AND ("name" LIKE $1 OR "email" LIKE $2)'
+    )
+    expect(params).toEqual(['%a%', '%a%'])
+  })
+
+  test('params before and after a group stay sequential', async () => {
+    const { sql: s, params } = await sql('users', {
+      selects: ['*'],
+      wheres: [
+        { column: 'a', operator: '=', value: 1, boolean: 'and' },
+        { type: 'group', boolean: 'and', wheres: [
+          { column: 'b', operator: '=', value: 2, boolean: 'and' },
+        ] },
+        { column: 'c', operator: '=', value: 3, boolean: 'and' },
+      ],
+      limit: 10,
+    })
+    expect(s).toContain('"a" = $1 AND ("b" = $2) AND "c" = $3')
+    expect(s).toContain('LIMIT $4')
+    expect(params).toEqual([1, 2, 3, 10])
+  })
+
+  test('nested groups recurse', async () => {
+    const { sql: s, params } = await sql('users', {
+      selects: ['*'],
+      wheres: [{ type: 'group', boolean: 'and', wheres: [
+        { column: 'a', operator: '=', value: 1, boolean: 'and' },
+        { type: 'group', boolean: 'or', wheres: [
+          { column: 'b', operator: '=', value: 2, boolean: 'and' },
+          { column: 'c', operator: '=', value: 3, boolean: 'and' },
+        ] },
+      ] }],
+    })
+    expect(s).toContain('WHERE ("a" = $1 OR ("b" = $2 AND "c" = $3))')
+    expect(params).toEqual([1, 2, 3])
+  })
+
+  test('an empty group emits no clause', async () => {
+    const { sql: s } = await sql('users', {
+      selects: ['*'],
+      wheres: [{ type: 'group', boolean: 'and', wheres: [] }],
+    })
+    expect(s).toBe('SELECT * FROM "users"')
+  })
+})
+
+// ─── HAVING ───────────────────────────────────────────────────────────────────
+describe('HAVING', () => {
+  test('multiple havings are AND-ed into one clause', async () => {
+    const { sql: s, params } = await sql('orders', {
+      selects: [{ raw: 'user_id, SUM(total) AS t' }],
+      wheres: [],
+      groupBys: ['user_id'],
+      havings: [
+        { column: 'total', operator: '>', value: 100 },
+        { column: 'total', operator: '<', value: 900 },
+      ],
+    })
+    expect(s.match(/HAVING/g)).toHaveLength(1)
+    expect(s).toContain('HAVING "total" > $1 AND "total" < $2')
+    expect(params).toEqual([100, 900])
+  })
+})
+
+// ─── Bulk insert ──────────────────────────────────────────────────────────────
+describe('insertMany', () => {
+  test('one statement, one tuple per row, sequential params', async () => {
+    const seen = []
+    const r = new PgResolver({ query: async (sql, params) => { seen.push({ sql, params }); return { rows: [] } } })
+    await r.insertMany('users', [{ name: 'a', age: 1 }, { name: 'b', age: 2 }])
+    expect(seen).toHaveLength(1)
+    expect(seen[0].sql).toBe(
+      'INSERT INTO "users" ("name", "age") VALUES ($1, $2), ($3, $4) RETURNING *'
+    )
+    expect(seen[0].params).toEqual(['a', 1, 'b', 2])
+  })
+
+  test('column set is the union of row keys; missing keys become NULL', async () => {
+    const seen = []
+    const r = new PgResolver({ query: async (sql, params) => { seen.push({ sql, params }); return { rows: [] } } })
+    await r.insertMany('users', [{ name: 'a' }, { name: 'b', age: 2 }])
+    expect(seen[0].sql).toContain('("name", "age")')
+    expect(seen[0].params).toEqual(['a', null, 'b', 2])
+  })
+
+  test('falsy-but-present values are preserved', async () => {
+    const seen = []
+    const r = new PgResolver({ query: async (sql, params) => { seen.push({ sql, params }); return { rows: [] } } })
+    await r.insertMany('users', [{ active: false, n: 0 }])
+    expect(seen[0].params).toEqual([false, 0])
+  })
+
+  test('empty input is a no-op', async () => {
+    const seen = []
+    const r = new PgResolver({ query: async () => { seen.push(1); return { rows: [] } } })
+    expect(await r.insertMany('users', [])).toEqual([])
+    expect(seen).toHaveLength(0)
+  })
+})
+
+// ─── Column defaults ──────────────────────────────────────────────────────────
+describe('Column DEFAULT rendering', () => {
+  const ddl = async (col) => {
+    const seen = []
+    const r = new PgResolver({ query: async (sql) => { seen.push(sql); return { rows: [] } } })
+    await r.createTable('t', { columns: [{ name: 'c', type: 'string', _nullable: true, ...col }], foreigns: [], indexes: [] })
+    return seen.join('\n')
+  }
+
+  test('string literal defaults are quoted', async () => {
+    expect(await ddl({ _default: 'active' })).toContain("DEFAULT 'active'")
+  })
+
+  test('quotes inside a literal are escaped', async () => {
+    expect(await ddl({ _default: "O'Brien" })).toContain("DEFAULT 'O''Brien'")
+  })
+
+  test('function-call defaults pass through raw', async () => {
+    expect(await ddl({ _default: 'gen_random_uuid()' })).toContain('DEFAULT gen_random_uuid()')
+  })
+
+  test('CURRENT_TIMESTAMP passes through raw', async () => {
+    expect(await ddl({ _default: 'CURRENT_TIMESTAMP' })).toContain('DEFAULT CURRENT_TIMESTAMP')
+  })
+
+  test('numbers are unquoted', async () => {
+    expect(await ddl({ _default: 5 })).toContain('DEFAULT 5')
+  })
+
+  test('booleans render as TRUE/FALSE', async () => {
+    expect(await ddl({ _default: false })).toContain('DEFAULT FALSE')
+  })
+})

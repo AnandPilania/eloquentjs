@@ -485,3 +485,66 @@ describe('Model local scopes (via withScopes proxy)', () => {
     expect(qb2._wheres[0].column).toBe('is_admin')
   })
 })
+
+// ─── Unguard scoping ──────────────────────────────────────────────────────────
+describe('unguard is per-class, not global', () => {
+  class Guarded extends Model {
+    static table = 'guarded'
+    static fillable = ['name']
+    static timestamps = false
+  }
+  class Other extends Model {
+    static table = 'other'
+    static fillable = ['name']
+    static timestamps = false
+  }
+
+  afterEach(() => { Guarded.reguard(); Other.reguard(); Model.reguard() })
+
+  test('unguarding one model does not unguard a sibling', () => {
+    Guarded.unguard()
+    expect(Guarded.isUnguarded()).toBe(true)
+    expect(Other.isUnguarded()).toBe(false)
+  })
+
+  test('Model.unguard() unguards every subclass', () => {
+    Model.unguard()
+    expect(Guarded.isUnguarded()).toBe(true)
+    expect(Other.isUnguarded()).toBe(true)
+  })
+
+  test('reguard on a sibling does not re-guard the unguarded one', () => {
+    Guarded.unguard()
+    Other.reguard()
+    expect(Guarded.isUnguarded()).toBe(true)
+  })
+
+  test('unguarded(cb) restores the previous state', async () => {
+    expect(Guarded.isUnguarded()).toBe(false)
+    await Guarded.unguarded(async () => { expect(Guarded.isUnguarded()).toBe(true) })
+    expect(Guarded.isUnguarded()).toBe(false)
+  })
+
+  test('unguarded(cb) restores even when the callback throws', async () => {
+    await expect(Guarded.unguarded(async () => { throw new Error('boom') })).rejects.toThrow('boom')
+    expect(Guarded.isUnguarded()).toBe(false)
+  })
+
+  test('unguarded(cb) leaves an already-unguarded class unguarded', async () => {
+    Guarded.unguard()
+    await Guarded.unguarded(async () => {})
+    expect(Guarded.isUnguarded()).toBe(true)
+  })
+
+  test('non-fillable keys pass fill() only while unguarded', () => {
+    expect(new Guarded().fill({ id: 99 }).id).toBeUndefined()
+
+    Guarded.unguard()
+    expect(new Guarded().fill({ id: 99 }).id).toBe(99)
+  })
+
+  test('unguarding a sibling does not open this model up', () => {
+    Other.unguard()
+    expect(new Guarded().fill({ id: 99 }).id).toBeUndefined()
+  })
+})

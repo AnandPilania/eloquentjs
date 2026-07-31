@@ -10,7 +10,7 @@
  */
 
 import { Collection } from '../Collection.js'
-import { inferForeignKey } from '../utils.js'
+import { inferForeignKey, toSnakeCase } from '../utils.js'
 
 function getResolver(ModelClass) {
     // Import lazily to avoid circular dep at module load time
@@ -198,8 +198,8 @@ class BelongsTo {
 // ─── BelongsToMany ───────────────────────────────────────────────────────────
 class BelongsToMany {
     constructor(parent, Related, pivotTable, foreignKey, relatedKey) {
-        const parentSnake = parent.constructor.name.replace(/([A-Z])/g, m => `_${m.toLowerCase()}`).replace(/^_/, '')
-        const relatedSnake = Related.name.replace(/([A-Z])/g, m => `_${m.toLowerCase()}`).replace(/^_/, '')
+        const parentSnake = toSnakeCase(parent.constructor.name)
+        const relatedSnake = toSnakeCase(Related.name)
 
         this._parent = parent
         this._Related = Related

@@ -643,3 +643,74 @@ describe('Context isolation — builder state', () => {
     expect(qb._offset).toBe(origOffset)
   })
 })
+
+// ─── Nested where groups ──────────────────────────────────────────────────────
+describe('Nested where groups — where(fn) / orWhere(fn)', () => {
+  test('where(fn) collects the callback wheres into one group', async () => {
+    const qb = User.where('active', true).where(q => {
+      q.where('name', 'LIKE', '%a%').orWhere('email', 'LIKE', '%a%')
+    })
+    const ctx = qb._buildContext()
+    expect(ctx.wheres).toHaveLength(2)
+    const group = ctx.wheres[1]
+    expect(group.type).toBe('group')
+    expect(group.boolean).toBe('and')
+    expect(group.wheres.map(w => w.column)).toEqual(['name', 'email'])
+    expect(group.wheres[1].boolean).toBe('or')
+  })
+
+  test('orWhere(fn) marks the group as OR', async () => {
+    const ctx = User.where('a', 1).orWhere(q => q.where('b', 2).where('c', 3))._buildContext()
+    expect(ctx.wheres[1]).toMatchObject({ type: 'group', boolean: 'or' })
+    expect(ctx.wheres[1].wheres).toHaveLength(2)
+  })
+
+  test('the sub-builder inherits no global scopes', async () => {
+    // Post has softDeletes — the outer builder gets whereNull(deleted_at),
+    // the group must not.
+    const ctx = Post.where(q => q.where('a', 1))._buildContext()
+    const group = ctx.wheres.find(w => w.type === 'group')
+    expect(group.wheres).toHaveLength(1)
+    expect(group.wheres[0].column).toBe('a')
+  })
+
+  test('an empty callback adds nothing', async () => {
+    const ctx = User.where('a', 1).where(() => {})._buildContext()
+    expect(ctx.wheres).toHaveLength(1)
+  })
+
+  test('whereRaw inside a group is carried on the group', async () => {
+    const ctx = User.where(q => q.whereRaw('x = ?', [1]))._buildContext()
+    expect(ctx.wheres[0].rawWheres).toEqual([{ sql: 'x = ?', bindings: [1] }])
+  })
+})
+
+// ─── Global scope / OR precedence ─────────────────────────────────────────────
+describe('Global scopes vs OR precedence', () => {
+  test('soft-delete scope is isolated from user ORs', async () => {
+    // Flat, `deleted_at IS NULL AND a=1 OR b=2` parses as
+    // `(deleted_at IS NULL AND a=1) OR b=2` and leaks trashed rows.
+    const ctx = Post.where('a', 1).orWhere('b', 2)._buildContext()
+    expect(ctx.wheres).toHaveLength(2)
+    expect(ctx.wheres[0]).toMatchObject({ type: 'null', column: 'deleted_at', _scope: '_softDelete' })
+    expect(ctx.wheres[1]).toMatchObject({ type: 'group', boolean: 'and' })
+    expect(ctx.wheres[1].wheres.map(w => w.column)).toEqual(['a', 'b'])
+  })
+
+  test('all-AND queries are left flat', async () => {
+    const ctx = Post.where('a', 1).where('b', 2)._buildContext()
+    expect(ctx.wheres).toHaveLength(3)
+    expect(ctx.wheres.some(w => w.type === 'group')).toBe(false)
+  })
+
+  test('no scopes means no wrapping', async () => {
+    const ctx = User.where('a', 1).orWhere('b', 2)._buildContext()
+    expect(ctx.wheres.some(w => w.type === 'group')).toBe(false)
+  })
+
+  test('_wheres itself is not mutated by _buildContext', async () => {
+    const qb = Post.where('a', 1).orWhere('b', 2)
+    qb._buildContext()
+    expect(qb._wheres).toHaveLength(3)
+  })
+})
