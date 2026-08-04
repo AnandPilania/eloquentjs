@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.0.7] — 2026-08-04
+
+### 🐛 Bug Fixes
+
+- dependencies conflict by peerDependency (`3938fd0`)
+
+
+---
+
 ## [0.0.6] — 2026-08-04
 
 ### ✨ Features

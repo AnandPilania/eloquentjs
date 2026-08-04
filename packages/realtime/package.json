@@ -1,6 +1,6 @@
 {
   "name": "@eloquentjs/realtime",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "description": "Real-time WebSocket subscriptions for EloquentJS models",
   "type": "module",
   "main": "src/index.js",
@@ -15,7 +15,7 @@
     }
   },
   "dependencies": {
-    "@eloquentjs/core": "^0.0.6",
+    "@eloquentjs/core": "^0.0.7",
     "ws": "^8.19.0"
   },
   "license": "MIT",
