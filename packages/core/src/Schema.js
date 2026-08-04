@@ -144,8 +144,12 @@ export class Blueprint {
   dropSoftDeletes(col = 'deleted_at') { this.drops.push(col); return this }
 
   // ─── Internal column builder ──────────────────────────────────────────────
+  /**
+   * @param {Record<string, any>} def
+   * @returns {any} a plain column-def object plus chainable modifiers (nullable(), default(), ...)
+   */
   _col(def) {
-    const col = Object.assign({
+    const col = Object.assign(/** @type {any} */ ({
       _nullable: false,
       _default:  undefined,
       _unique:   false,
@@ -160,7 +164,7 @@ export class Blueprint {
       unsigned()      { this.unsigned = true; return this },
       useCurrent()    { this._default = 'CURRENT_TIMESTAMP'; return this },
       index()         { /* handled at table level */ return this },
-    }, def)
+    }), def)
 
     this.columns.push(col)
     return col

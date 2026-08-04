@@ -39,10 +39,13 @@ export async function connect(config = {}, connectionName = 'default') {
 
 async function loadDatabase() {
   if (globalThis.Bun) {
+    // ponytail: no @types/bun in this repo — bun:sqlite only resolves at runtime under Bun
+    // @ts-ignore
     const { Database } = await import('bun:sqlite')
     return { Database, runtime: 'bun' }
   }
 
+  // @ts-ignore optional peer dep — types not installed, only needed under Node
   const { default: Database } = await import('better-sqlite3')
   return { Database, runtime: 'node' }
 }

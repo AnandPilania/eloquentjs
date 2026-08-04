@@ -41,7 +41,7 @@
     "test:coverage": "node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage --runInBand --forceExit",
     "test:ci": "node --experimental-vm-modules node_modules/jest/bin/jest.js tests/unit --ci --runInBand --forceExit --no-coverage",
     "lint": "node scripts/lint.js",
-    "build": "echo 'ESM — no build step needed'",
+    "build": "npm run build --workspaces --if-present",
     "eloquent": "node packages/cli/bin/eloquent.js",
     "sync": "node scripts/sync-metadata.js",
     "clean": "npm run clean:workspaces && rimraf node_modules",
@@ -64,9 +64,12 @@
   },
   "devDependencies": {
     "@faker-js/faker": "^8.4.1",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^26.1.2",
     "glob": "^10.5.0",
     "jest": "^29.7.0",
-    "rimraf": "^6.0.1"
+    "rimraf": "^6.0.1",
+    "typescript": "^7.0.2"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1"

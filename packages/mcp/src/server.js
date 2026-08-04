@@ -209,7 +209,7 @@ export function createServer(options = {}) {
                 break
             }
             case 'eloquentjs://models': {
-                const result = await handleListModels({}, c).catch(e => ({ error: e.message }))
+                const result = /** @type {any} */ (await handleListModels({}, c).catch(e => ({ error: e.message })))
                 const models = result.models?.map(m => ({
                     name: m.name, table: m.table, file: m.file,
                     fields: m.fieldCount, relations: m.relations?.length ?? 0,

@@ -6,6 +6,7 @@
  * layer — where types, operator mapping, OR precedence, nested groups.
  */
 
+import { ObjectId } from 'mongodb'
 import { MongoResolver } from '../../packages/mongodb/src/index.js'
 
 // Mock db: collection().find() records the filter and returns an empty cursor.
@@ -74,6 +75,32 @@ describe('Where type translation', () => {
 
   test('no wheres means an empty filter', async () => {
     expect(await filterFor({ wheres: [] })).toEqual({})
+  })
+})
+
+describe('_id primary-key lookups', () => {
+  test('where("_id", stringId) normalizes to ObjectId so it can match', async () => {
+    const id = new ObjectId().toString()
+    const f = await filterFor({ wheres: [{ column: '_id', operator: '=', value: id, boolean: 'and' }] })
+    expect(f._id.$eq).toBeInstanceOf(ObjectId)
+    expect(f._id.$eq.toString()).toBe(id)
+  })
+
+  test('whereIn("_id", stringIds) normalizes every value', async () => {
+    const ids = [new ObjectId().toString(), new ObjectId().toString()]
+    const f = await filterFor({ wheres: [{ type: 'in', column: '_id', values: ids, boolean: 'and' }] })
+    expect(f._id.$in.every(v => v instanceof ObjectId)).toBe(true)
+    expect(f._id.$in.map(String)).toEqual(ids)
+  })
+
+  test('an invalid _id string is passed through unchanged, not thrown', async () => {
+    const f = await filterFor({ wheres: [{ column: '_id', operator: '=', value: 'not-an-object-id', boolean: 'and' }] })
+    expect(f._id.$eq).toBe('not-an-object-id')
+  })
+
+  test('non-_id columns are left untouched', async () => {
+    const f = await filterFor({ wheres: [{ column: 'name', operator: '=', value: 'Alice', boolean: 'and' }] })
+    expect(f.name.$eq).toBe('Alice')
   })
 })
 

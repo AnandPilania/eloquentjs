@@ -5,10 +5,22 @@
   "type": "module",
   "main": "src/index.js",
   "exports": {
-    ".": "./src/index.js",
-    "./introspect": "./src/introspect.js",
-    "./templates": "./src/templates/index.js",
-    "./render": "./src/render.js"
+    ".": {
+      "types": "./dist-types/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./introspect": {
+      "types": "./dist-types/introspect.d.ts",
+      "default": "./src/introspect.js"
+    },
+    "./templates": {
+      "types": "./dist-types/templates/index.d.ts",
+      "default": "./src/templates/index.js"
+    },
+    "./render": {
+      "types": "./dist-types/render.d.ts",
+      "default": "./src/render.js"
+    }
   },
   "keywords": [
     "orm",
@@ -39,6 +51,11 @@
   },
   "files": [
     "src",
-    "README.md"
-  ]
+    "README.md",
+    "dist-types"
+  ],
+  "types": "dist-types/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  }
 }

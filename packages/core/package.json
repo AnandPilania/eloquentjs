@@ -5,8 +5,14 @@
   "type": "module",
   "main": "src/index.js",
   "exports": {
-    ".": "./src/index.js",
-    "./testing": "./src/testing/conformance.js"
+    ".": {
+      "types": "./dist-types/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./testing": {
+      "types": "./dist-types/testing/conformance.d.ts",
+      "default": "./src/testing/conformance.js"
+    }
   },
   "keywords": [
     "orm",
@@ -33,6 +39,11 @@
   "files": [
     "src",
     "README.md",
-    "RESOLVER.md"
-  ]
+    "RESOLVER.md",
+    "dist-types"
+  ],
+  "types": "dist-types/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  }
 }

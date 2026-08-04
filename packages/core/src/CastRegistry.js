@@ -19,6 +19,7 @@
  */
 
 /** @type {Map<string, {get, set, serialize}>} */
+/** @type {Map<string, {get: (v: any) => any, set: (v: any) => any, serialize?: (v: any) => any}>} */
 const _custom = new Map()
 
 // ─── Built-in cast definitions ────────────────────────────────────────────────
@@ -105,8 +106,8 @@ _builtins.jsonb       = _builtins.json
 export const CastRegistry = {
   /**
    * Register a globally named custom cast.
-   * @param {string}   name
-   * @param {Function} CastClass  - class with get/set/serialize methods
+   * @param {string} name
+   * @param {new (...args: any[]) => {get: (v: any) => any, set: (v: any) => any, serialize?: (v: any) => any}} CastClass  - class with get/set/serialize methods
    */
   register(name, CastClass) {
     _custom.set(name, new CastClass())

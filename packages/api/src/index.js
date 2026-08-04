@@ -95,7 +95,9 @@ function buildExpressRouter(ModelClass, options = {}) {
     try {
       // Run middleware
       for (const mw of middleware) {
-        await new Promise((resolve, reject) => mw(req, res, (err) => err ? reject(err) : resolve()))
+        /** @type {Promise<void>} */
+        const mwDone = new Promise((resolve, reject) => mw(req, res, (err) => err ? reject(err) : resolve()))
+        await mwDone
       }
 
       const path = req.path

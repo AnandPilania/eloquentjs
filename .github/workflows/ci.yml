@@ -84,6 +84,26 @@ jobs:
           done
 
   # ────────────────────────────────────────────────────────────────────────────
+  typecheck:
+    name: Typecheck (JSDoc → .d.ts)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      # Emits declarations from JSDoc via tsc --allowJs --checkJs; fails the job
+      # if any package's JSDoc doesn't type-check. See tsconfig.base.json.
+      - name: Build declarations for all packages
+        run: npm run build
+
+  # ────────────────────────────────────────────────────────────────────────────
   check-versions:
     name: Verify version consistency
     runs-on: ubuntu-latest
@@ -103,7 +123,7 @@ jobs:
   ci-success:
     name: CI Passed
     runs-on: ubuntu-latest
-    needs: [test, lint, check-versions]
+    needs: [test, lint, typecheck, check-versions]
     if: always()
 
     steps:
@@ -112,6 +132,7 @@ jobs:
           failed=0
           if [[ "${{ needs.test.result }}"           != "success" ]]; then echo "Tests failed";          failed=1; fi
           if [[ "${{ needs.lint.result }}"           != "success" ]]; then echo "Lint failed";           failed=1; fi
+          if [[ "${{ needs.typecheck.result }}"      != "success" ]]; then echo "Typecheck failed";       failed=1; fi
           if [[ "${{ needs.check-versions.result }}" != "success" ]]; then echo "Version check failed";  failed=1; fi
           if [[ "$failed" == "1" ]]; then exit 1; fi
           echo "All CI jobs passed ✔"

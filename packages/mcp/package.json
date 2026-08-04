@@ -8,9 +8,18 @@
     "eloquent-mcp": "./bin/server.js"
   },
   "exports": {
-    ".": "./src/index.js",
-    "./server": "./src/server.js",
-    "./tools": "./src/tools/index.js"
+    ".": {
+      "types": "./dist-types/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./server": {
+      "types": "./dist-types/server.d.ts",
+      "default": "./src/server.js"
+    },
+    "./tools": {
+      "types": "./dist-types/tools/index.d.ts",
+      "default": "./src/tools/index.js"
+    }
   },
   "keywords": [
     "mcp",
@@ -47,6 +56,11 @@
   "files": [
     "src",
     "bin",
-    "README.md"
-  ]
+    "README.md",
+    "dist-types"
+  ],
+  "types": "dist-types/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  }
 }

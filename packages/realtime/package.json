@@ -5,8 +5,14 @@
   "type": "module",
   "main": "src/index.js",
   "exports": {
-    ".": "./src/index.js",
-    "./client": "./src/index.js"
+    ".": {
+      "types": "./dist-types/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./client": {
+      "types": "./dist-types/index.d.ts",
+      "default": "./src/index.js"
+    }
   },
   "dependencies": {
     "@eloquentjs/core": "^0.0.5",
@@ -30,6 +36,11 @@
   },
   "files": [
     "src",
-    "README.md"
-  ]
+    "README.md",
+    "dist-types"
+  ],
+  "types": "dist-types/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  }
 }

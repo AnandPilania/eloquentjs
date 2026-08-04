@@ -114,6 +114,9 @@ jobs:
 
       - run: npm ci
 
+      - name: Build declarations for all packages
+        run: npm run build
+
       - name: Publish all packages
         run: node scripts/publish.js --tag=${{ needs.validate.outputs.dist_tag }}
         env:

@@ -19,7 +19,7 @@ export function setResolver(resolver, name = 'default') {
 /**
  * Get a registered resolver.
  * @param {string} name
- * @returns {object}
+ * @returns {import('./Model.js').ModelResolver}
  */
 export function getResolver(name = 'default') {
   const r = _connections.get(name)

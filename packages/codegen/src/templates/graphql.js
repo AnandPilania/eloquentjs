@@ -9,9 +9,9 @@
 
 /**
  * Generate full GraphQL SDL for one model.
- * @param {ModelSchema} schema
- * @param {object} opts
- * @returns {{ type, inputCreate, inputUpdate, inputWhere, paginated, queries, mutations, subscriptions }}
+ * @param {import('../introspect.js').ModelSchema} schema
+ * @param {{pagination?: 'offset'|'relay', subscriptions?: boolean}} opts
+ * @returns {{ typeDef: string, inputCreate: string, inputUpdate: string, inputWhere: string, paginated: string, queryLines: string[], mutationLines: string[], subscriptionLines: string[] }}
  */
 export function generateGraphqlSDL(schema, opts = {}) {
   const {
@@ -122,8 +122,8 @@ export function generateGraphqlSDL(schema, opts = {}) {
 
 /**
  * Generate a complete standalone .graphql schema file for one or more models.
- * @param {ModelSchema[]} schemas
- * @param {object} opts
+ * @param {import('../introspect.js').ModelSchema[]} schemas
+ * @param {{pagination?: 'offset'|'relay', subscriptions?: boolean, scalars?: string[], header?: boolean}} opts
  * @returns {string} — complete SDL string ready to write to a .graphql file
  */
 export function generateGraphqlSchema(schemas, opts = {}) {

@@ -58,20 +58,57 @@ const _unguardedClasses = new WeakSet()
 // Works whether `obj` is the proxy or the raw instance.
 function raw(obj) { return obj[SELF] ?? obj }
 
+/**
+ * The Resolver Contract — see packages/core/RESOLVER.md.
+ * A driver (mongodb, pgsql, sqlite, ...) implements this to plug into Model/QueryBuilder.
+ * Schema/relation/aggregate methods are optional: a store that can't support them
+ * should throw a clear error instead (see @eloquentjs/mongodb's pivot methods).
+ * @typedef {Object} ModelResolver
+ * @property {(table: string, ctx: any) => Promise<Record<string, any>[]>} select
+ * @property {(table: string, data: Record<string, any>) => Promise<Record<string, any> & {insertedId?: any}>} insert
+ * @property {(table: string, rows: Record<string, any>[]) => Promise<Record<string, any>[]>} [insertMany]
+ * @property {(table: string, conditions: Record<string, any>, data: Record<string, any>, ctx?: any) => Promise<number>} update
+ * @property {(table: string, conditions: Record<string, any>, ctx?: any) => Promise<number>} delete
+ * @property {(table: string) => Promise<void>} truncate
+ * @property {(table: string, fn: 'count'|'sum'|'avg'|'min'|'max', column: string, ctx: any) => Promise<number>} [aggregate]
+ * @property {(table: string, ctx: any) => Promise<{sql: string, params: any[]} | Record<string, any>>} [toSQL]
+ * @property {(table: string, column: string, amount: number, extra: Record<string, any>, ctx: any) => Promise<number>} [increment]
+ * @property {(opts: Record<string, any>) => Promise<Record<string, any>[]>} [selectPivot]
+ * @property {(opts: Record<string, any>) => Promise<Record<string, any>[]>} [selectPivotMany]
+ * @property {(opts: Record<string, any>) => Promise<Record<string, any>[]>} [hasManyThrough]
+ * @property {(opts: Record<string, any>) => Promise<Record<string, any>[]>} [hasManyThroughMany]
+ * @property {(table: string, blueprint: any) => Promise<void>} [createTable]
+ * @property {(table: string, blueprint: any) => Promise<void>} [alterTable]
+ * @property {(table: string, opts?: {ifExists?: boolean}) => Promise<void>} [dropTable]
+ * @property {(from: string, to: string) => Promise<void>} [renameTable]
+ * @property {(table: string) => Promise<boolean>} [hasTable]
+ * @property {(table: string, column: string) => Promise<boolean>} [hasColumn]
+ * @property {(table: string) => Promise<string[]>} [getColumnListing]
+ * @property {(fn: (session: any) => Promise<any>) => Promise<any>} [transaction]
+ */
+
 // ─── Model ───────────────────────────────────────────────────────────────────
 export class Model {
     // ─── Subclass overrides ────────────────────────────────────────────────────
+    /** @type {string | null} */
     static table = null      // defaults to snake_plural of class name
     static primaryKey = 'id'
-    static keyType = 'integer' // 'integer' | 'uuid'
+    /** @type {'integer' | 'uuid'} */
+    static keyType = 'integer'
     static incrementing = true
 
+    /** @type {string[]} */
     static fillable = []        // [] means nothing is fillable unless guarded is also []
+    /** @type {string[]} */
     static guarded = ['id']    // ['*'] to guard all; [] to allow all
 
+    /** @type {Record<string, string>} */
     static casts = {}
+    /** @type {string[]} */
     static hidden = []
+    /** @type {string[]} */
     static visible = []
+    /** @type {string[]} */
     static appends = []
 
     static timestamps = true
@@ -81,6 +118,7 @@ export class Model {
     static softDeletes = false
     static deletedAtColumn = 'deleted_at'
 
+    /** @type {Record<string, (qb: QueryBuilder) => void>} */
     static globalScopes = {}   // { name: qb => qb.where(...) }
     static connection = 'default'
 
@@ -98,6 +136,7 @@ export class Model {
     // We define real private fields but access them only from methods defined
     // inside the class body — where JS allows it.
 
+    /** @param {Record<string, any>} attributes */
     constructor(attributes = {}) {
         // Fill attributes BEFORE wrapping in Proxy
         _attrs.set(raw(this), {})
@@ -119,6 +158,7 @@ export class Model {
         return this.table ?? toSnakePlural(this.name)
     }
 
+    /** @returns {ModelResolver} */
     static getResolver() {
         return getResolver(this.connection)
     }
@@ -156,6 +196,11 @@ export class Model {
     }
 
     // ─── Query builder factory ─────────────────────────────────────────────────
+    /**
+     * @template {typeof Model} T
+     * @this {T}
+     * @returns {QueryBuilder<T>}
+     */
     static query() {
         const qb = new QueryBuilder(this, this.getResolver())
 
@@ -223,22 +268,44 @@ export class Model {
     static withTrashed() { return this.query().withTrashed() }
     static onlyTrashed() { return this.query().onlyTrashed() }
 
+    /** @template {typeof Model} T @this {T} @returns {Promise<Collection<InstanceType<T>>>} */
     static async all() { return this.query().get() }
+    /** @template {typeof Model} T @this {T} @returns {Promise<Collection<InstanceType<T>>>} */
     static async get() { return this.query().get() }
+    /** @template {typeof Model} T @this {T} @returns {Promise<InstanceType<T> | null>} */
     static async first() { return this.query().first() }
+    /** @template {typeof Model} T @this {T} @returns {Promise<InstanceType<T>>} */
     static async firstOrFail() { return this.query().firstOrFail() }
 
+    /**
+     * @template {typeof Model} T
+     * @this {T}
+     * @param {string | number | (string | number)[]} id
+     * @returns {Promise<InstanceType<T> | Collection<InstanceType<T>> | null>}
+     */
     static async find(id) {
         if (Array.isArray(id)) return this.query().whereIn(this.primaryKey, id).get()
         return this.query().where(this.primaryKey, id).first()
     }
 
+    /**
+     * @template {typeof Model} T
+     * @this {T}
+     * @param {string | number} id
+     * @returns {Promise<InstanceType<T>>}
+     */
     static async findOrFail(id) {
-        const m = await this.find(id)
+        const m = await this.query().where(this.primaryKey, id).first()
         if (!m) throw new ModelNotFoundException(`${this.name} [${id}] not found`)
         return m
     }
 
+    /**
+     * @template {typeof Model} T
+     * @this {T}
+     * @param {(string | number)[]} ids
+     * @returns {Promise<Collection<InstanceType<T>>>}
+     */
     static async findMany(ids) {
         return this.query().whereIn(this.primaryKey, ids).get()
     }
@@ -256,8 +323,14 @@ export class Model {
     static async chunk(n, fn) { return this.query().chunk(n, fn) }
     static async paginate(p, pp) { return this.query().paginate(p, pp) }
 
+    /**
+     * @template {typeof Model} T
+     * @this {T}
+     * @param {Record<string, any>} attributes
+     * @returns {Promise<InstanceType<T>>}
+     */
     static async create(attributes = {}) {
-        const model = new this()
+        const model = /** @type {InstanceType<T>} */ (new this())
         model._fillRaw(attributes)
         await model.save()
         return model
@@ -308,7 +381,7 @@ export class Model {
      * both fill() and _fillRaw() so the logic can never drift.
      */
     _getAllowedKeys(attributes) {
-        const Klass = this.constructor
+        const Klass = /** @type {typeof Model} */ (this.constructor)
         const keys = Object.keys(attributes)
 
         if (Klass.isUnguarded()) {
@@ -342,7 +415,7 @@ export class Model {
 
     // ─── Attribute get / set ──────────────────────────────────────────────────
     setAttribute(key, value) {
-        const Klass = this.constructor
+        const Klass = /** @type {typeof Model} */ (this.constructor)
         const mutator = `set${toPascalCase(key)}Attribute`
 
         if (typeof this[mutator] === 'function') {
@@ -356,7 +429,7 @@ export class Model {
     }
 
     getAttribute(key) {
-        const Klass = this.constructor
+        const Klass = /** @type {typeof Model} */ (this.constructor)
         const accessor = `get${toPascalCase(key)}Attribute`
         const rawVal = _attrs.get(raw(this))[key]
 
@@ -395,7 +468,7 @@ export class Model {
 
     // ─── Persist ──────────────────────────────────────────────────────────────
     async save() {
-        const Klass = this.constructor
+        const Klass = /** @type {typeof Model} */ (this.constructor)
         const hooks = HookRegistry.for(Klass)
         const now = new Date()
 
@@ -467,7 +540,7 @@ export class Model {
     }
 
     async delete() {
-        const Klass = this.constructor
+        const Klass = /** @type {typeof Model} */ (this.constructor)
         const hooks = HookRegistry.for(Klass)
 
         await hooks.fire('deleting', this)
@@ -501,7 +574,7 @@ export class Model {
     }
 
     async forceDelete() {
-        const Klass = this.constructor
+        const Klass = /** @type {typeof Model} */ (this.constructor)
         const hooks = HookRegistry.for(Klass)
 
         await hooks.fire('deleting', this)
@@ -519,7 +592,7 @@ export class Model {
     }
 
     async restore() {
-        const Klass = this.constructor
+        const Klass = /** @type {typeof Model} */ (this.constructor)
         if (!Klass.softDeletes) return this
 
         const hooks = HookRegistry.for(Klass)
@@ -543,7 +616,7 @@ export class Model {
     }
 
     async refresh() {
-        const Klass = this.constructor
+        const Klass = /** @type {typeof Model} */ (this.constructor)
         const fresh = await Klass.withTrashed().where(Klass.primaryKey, _attrs.get(raw(this))[Klass.primaryKey]).first()
         if (fresh) {
             // Copy attrs from fresh instance — both are same class so private access is allowed
@@ -555,7 +628,7 @@ export class Model {
     }
 
     async fresh(withs = []) {
-        const Klass = this.constructor
+        const Klass = /** @type {typeof Model} */ (this.constructor)
         let qb = Klass.withTrashed().where(Klass.primaryKey, _attrs.get(raw(this))[Klass.primaryKey])
         if (withs.length) qb = qb.with(...withs)
         return qb.first()
@@ -598,7 +671,7 @@ export class Model {
 
     // ─── Serialization ────────────────────────────────────────────────────────
     toJSON() {
-        const Klass = this.constructor
+        const Klass = /** @type {typeof Model} */ (this.constructor)
         const out = {}
 
         for (const [key, rawVal] of Object.entries(_attrs.get(raw(this)))) {
@@ -637,6 +710,12 @@ export class Model {
      * This is the ONLY way rows become Model instances.
      * Called from QueryBuilder.get() / first().
      */
+    /**
+     * @template {typeof Model} T
+     * @this {T}
+     * @param {Record<string, any>} row
+     * @returns {InstanceType<T>}
+     */
     static _hydrate(row = {}) {
         // new this() → proxy; proxy[SELF] → raw instance (set in constructor)
         const proxy = new this()
@@ -653,7 +732,7 @@ export class Model {
         if (this.softDeletes && row[this.deletedAtColumn] != null) {
             _trashed.set(inst, true)
         }
-        return proxy
+        return /** @type {InstanceType<T>} */ (proxy)
     }
 }
 

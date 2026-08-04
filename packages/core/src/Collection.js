@@ -3,11 +3,14 @@
  *
  * Rich wrapper around query results. Extends Array so all native Array
  * methods still work. Collection-returning methods return new Collections.
+ * @template T
+ * @extends {Array<T>}
  */
 export class Collection extends Array {
   /**
    * Construct from an existing array without calling Array(n) with a number.
    * This avoids the Array(n) trap where new Array(5) creates a sparse array.
+   * @param {T[]} items
    */
   constructor(items = []) {
     super()
@@ -54,7 +57,8 @@ export class Collection extends Array {
     else { operator = operatorOrValue; val = value }
 
     return new Collection(this.filter(item => {
-      const iv = typeof item.getAttribute === 'function' ? item.getAttribute(key) : item[key]
+      const anyItem = /** @type {any} */ (item)
+      const iv = typeof anyItem.getAttribute === 'function' ? anyItem.getAttribute(key) : anyItem[key]
       switch (operator) {
         case '=':
         case '==':  return iv == val   // intentional loose
@@ -149,7 +153,8 @@ export class Collection extends Array {
   except(...keys) {
     const exclude = new Set(keys.flat())
     return new Collection(this.map(item => {
-      const src = item?.toJSON?.() ?? item
+      const anyItem = /** @type {any} */ (item)
+      const src = anyItem?.toJSON?.() ?? anyItem
       const out = {}
       for (const [k, v] of Object.entries(src)) {
         if (!exclude.has(k)) out[k] = v
@@ -159,7 +164,10 @@ export class Collection extends Array {
   }
 
   mapInto(Klass) {
-    return new Collection(this.map(item => new Klass(item?.toJSON?.() ?? item)))
+    return new Collection(this.map(item => {
+      const anyItem = /** @type {any} */ (item)
+      return new Klass(anyItem?.toJSON?.() ?? anyItem)
+    }))
   }
 
   flatten() {
@@ -174,6 +182,6 @@ export class Collection extends Array {
 
   // ─── Serialization ───────────────────────────────────────────────────────────
   toArray()  { return Array.from(this) }
-  toJSON()   { return this.map(item => item?.toJSON?.() ?? item) }
+  toJSON()   { return this.map(item => { const a = /** @type {any} */ (item); return a?.toJSON?.() ?? a }) }
   toString() { return JSON.stringify(this.toJSON()) }
 }

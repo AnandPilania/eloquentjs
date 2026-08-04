@@ -13,12 +13,20 @@
 import { Collection } from './Collection.js'
 import { ModelNotFoundException } from './errors.js'
 
+/**
+ * @template {typeof import('./Model.js').Model} [T=typeof import('./Model.js').Model]
+ */
 export class QueryBuilder {
+  /**
+   * @param {T} ModelClass
+   * @param {import('./Model.js').ModelResolver} resolver
+   */
   constructor(ModelClass, resolver) {
     this._model    = ModelClass
     this._resolver = resolver
     this._wheres    = []
     this._rawWheres = []
+    /** @type {(string | {raw: string})[]} */
     this._selects   = ['*']
     this._joins     = []
     this._orderBys  = []
@@ -211,6 +219,7 @@ export class QueryBuilder {
   async doesntExist(){ return !(await this.exists()) }
 
   // ─── EXECUTION ───────────────────────────────────────────────────────────────
+  /** @returns {Promise<Collection<InstanceType<T>>>} */
   async get() {
     const rows = await this._resolver.select(this._model.getTable(), this._buildContext())
     const models = rows.map(row => this._model._hydrate(row))
@@ -218,6 +227,7 @@ export class QueryBuilder {
     return new Collection(models)
   }
 
+  /** @returns {Promise<InstanceType<T> | null>} */
   async first() {
     // Clone limit to avoid mutating shared builder state when used in paginate etc.
     const ctx = { ...this._buildContext(), limit: 1 }
@@ -228,6 +238,7 @@ export class QueryBuilder {
     return model
   }
 
+  /** @returns {Promise<InstanceType<T>>} */
   async firstOrFail() {
     const m = await this.first()
     if (!m) throw new ModelNotFoundException(`No ${this._model.name} record found`)

@@ -10,6 +10,12 @@
 import { MongoClient, ObjectId } from 'mongodb'
 import { setResolver } from '@eloquentjs/core'
 
+/**
+ * @typedef {Object} ConnectOptions
+ * @property {string} [url]
+ * @property {string} [database]
+ */
+
 // ─── Per-connection registries ────────────────────────────────────────────────
 // Keyed by connectionName so multiple named connections each get their own
 // client and db reference.  Module-level singletons would silently overwrite
@@ -30,6 +36,11 @@ function _getDb(connectionName = 'default') {
 }
 
 // ─── connect() ───────────────────────────────────────────────────────────────
+/**
+ * @param {ConnectOptions & Record<string, any>} options
+ * @param {string} connectionName
+ * @returns {Promise<MongoResolver>}
+ */
 export async function connect({ url, database, ...options } = {}, connectionName = 'default') {
     // Close existing connection for this name before replacing it
     if (_clients.has(connectionName)) {
@@ -50,12 +61,18 @@ export async function connect({ url, database, ...options } = {}, connectionName
     return resolver
 }
 
-/** Returns the raw mongodb.Db for the named connection (for advanced use). */
+/**
+ * Returns the raw mongodb.Db for the named connection (for advanced use).
+ * @param {string} connectionName
+ */
 export function getDb(connectionName = 'default') {
     return _getDb(connectionName)
 }
 
-/** Disconnect and remove the named connection (or all if name omitted). */
+/**
+ * Disconnect and remove the named connection (or all if name omitted).
+ * @param {string} [connectionName]
+ */
 export async function disconnect(connectionName) {
     if (connectionName) {
         await _clients.get(connectionName)?.close().catch(() => { })
@@ -68,7 +85,13 @@ export async function disconnect(connectionName) {
     }
 }
 
-/** Run a function inside a MongoDB session transaction. Rolls back on throw. */
+/**
+ * Run a function inside a MongoDB session transaction. Rolls back on throw.
+ * @template T
+ * @param {(session: import('mongodb').ClientSession) => Promise<T>} callback
+ * @param {string} connectionName
+ * @returns {Promise<T>}
+ */
 export async function transaction(callback, connectionName = 'default') {
     const session = _getClient(connectionName).startSession()
     try {
@@ -86,13 +109,23 @@ export async function transaction(callback, connectionName = 'default') {
 
 // ─── MongoResolver ───────────────────────────────────────────────────────────
 export class MongoResolver {
+    /**
+     * @param {import('mongodb').Db} db
+     * @param {string} connectionName
+     */
     constructor(db, connectionName = 'default') {
         this._db = db
         this._connectionName = connectionName
     }
 
+    /** @param {string} table */
     _col(table) { return this._db.collection(table) }
 
+    /**
+     * @param {string} table
+     * @param {any} ctx
+     * @returns {Promise<Record<string, any>[]>}
+     */
     async select(table, ctx) {
         const filter = buildFilter(ctx)
         let cursor = this._col(table).find(filter)
@@ -123,6 +156,10 @@ export class MongoResolver {
         return docs.map(normalizeDoc)
     }
 
+    /**
+     * @param {string} table
+     * @param {Record<string, any>} data
+     */
     async insert(table, data) {
         const doc = prepareInsertDoc(data)
         const result = await this._col(table).insertOne(doc)
@@ -130,6 +167,10 @@ export class MongoResolver {
         return { ...normalizeDoc(doc), id, _id: id, insertedId: result.insertedId }
     }
 
+    /**
+     * @param {string} table
+     * @param {Record<string, any>[]} rows
+     */
     async insertMany(table, rows) {
         if (!Array.isArray(rows) || !rows.length) return []
         const docs = rows.map(prepareInsertDoc)
@@ -137,6 +178,13 @@ export class MongoResolver {
         return docs.map((doc, i) => normalizeDoc({ ...doc, _id: doc._id ?? result.insertedIds[i] }))
     }
 
+    /**
+     * @param {string} table
+     * @param {Record<string, any>} conditions
+     * @param {Record<string, any>} data
+     * @param {any} [ctx]
+     * @returns {Promise<number>}
+     */
     async update(table, conditions, data, ctx = null) {
         const filter = ctx ? buildFilter(ctx) : buildSimpleFilter(conditions)
         // Remove undefined values
@@ -146,12 +194,25 @@ export class MongoResolver {
         return result.modifiedCount
     }
 
+    /**
+     * @param {string} table
+     * @param {Record<string, any>} conditions
+     * @param {any} [ctx]
+     * @returns {Promise<number>}
+     */
     async delete(table, conditions, ctx = null) {
         const filter = ctx ? buildFilter(ctx) : buildSimpleFilter(conditions)
         const result = await this._col(table).deleteMany(filter)
         return result.deletedCount
     }
 
+    /**
+     * @param {string} table
+     * @param {'count'|'sum'|'avg'|'min'|'max'} fn
+     * @param {string} column
+     * @param {any} ctx
+     * @returns {Promise<number | null>}
+     */
     async aggregate(table, fn, column, ctx) {
         const match = buildFilter(ctx)
         const aggMap = {
@@ -211,6 +272,7 @@ export class MongoResolver {
         return { collection: table, filter: buildFilter(ctx) }
     }
 
+    /** @param {string} table */
     async truncate(table) {
         await this._col(table).deleteMany({})
     }
@@ -298,8 +360,8 @@ function buildWhereCondition(w) {
             const sub = combineWheres(w.wheres ?? [])
             return Object.keys(sub).length ? sub : null
         }
-        case 'in': return { [w.column]: { $in: w.values ?? [] } }
-        case 'notIn': return { [w.column]: { $nin: w.values ?? [] } }
+        case 'in': return { [w.column]: { $in: normalizeIdValue(w.column, w.values ?? []) } }
+        case 'notIn': return { [w.column]: { $nin: normalizeIdValue(w.column, w.values ?? []) } }
         case 'null': return { [w.column]: { $eq: null } }
         case 'notNull': return { [w.column]: { $ne: null } }
         case 'between': return { [w.column]: { $gte: w.min, $lte: w.max } }
@@ -324,9 +386,18 @@ function buildWhereCondition(w) {
                 return { [w.column]: { $not: new RegExp(`^${pattern}$`, 'i') } }
             }
             const mongoOp = opMap[op] ?? '$eq'
-            return { [w.column]: { [mongoOp]: w.value } }
+            return { [w.column]: { [mongoOp]: normalizeIdValue(w.column, w.value) } }
         }
     }
+}
+
+// Mongo's `_id` is stored as ObjectId, but the primary-key lookup path
+// (Model.find/findMany/refresh/fresh) passes the string form straight into
+// where()/whereIn() — normalize it here so `{_id: {$eq: '...'}}` actually
+// matches instead of silently returning nothing.
+function normalizeIdValue(column, value) {
+    if (column !== '_id') return value
+    return Array.isArray(value) ? value.map(toObjectIdIfValid) : toObjectIdIfValid(value)
 }
 
 function buildSimpleFilter(conditions = {}) {

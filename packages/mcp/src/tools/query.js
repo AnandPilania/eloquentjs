@@ -4,6 +4,7 @@
  * Lets AI agents run queries, execute migrations, and seed data
  * directly against the configured database.
  */
+import { resolve } from 'path'
 
 // ─── Tool definitions ──────────────────────────────────────────────────────────
 
@@ -83,12 +84,12 @@ export const queryTools = [
 export async function handleQueryModel(args, ctx) {
   const { resolveConfig } = await import('@eloquentjs/cli/utils')
   const cfg = resolveConfig(ctx)
-  const dir = resolve_dir(ctx.cwd, args.modelsDir ?? cfg.paths.models)
+  const dir = resolve(ctx.cwd, args.modelsDir ?? cfg.paths.models)
 
   const { loadModelsByName } = await import('@eloquentjs/codegen/render')
   const [ModelClass] = await loadModelsByName(dir, [args.model])
 
-  let qb = ModelClass.query()
+  let qb = /** @type {any} */ (ModelClass).query()
 
   // Apply WHERE conditions
   if (args.where) {

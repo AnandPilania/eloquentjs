@@ -824,7 +824,7 @@ export async function handleNlpQuery(args, ctx) {
       const dir                  = resolve(ctx.cwd, args.modelsDir ?? cfg.paths.models)
       const [ModelClass]         = await loadModelsByName(dir, [parsed.model])
 
-      let qb = ModelClass.query()
+      let qb = /** @type {any} */ (ModelClass).query()
       for (const c of parsed.conditions) qb = qb.where(c.field, c.op === '=' ? c.value : [c.op, c.value])
       if (parsed.with.length)  qb = qb.with(...parsed.with)
       if (parsed.orderBy)      qb = qb.orderBy(parsed.orderBy.field, parsed.orderBy.dir)

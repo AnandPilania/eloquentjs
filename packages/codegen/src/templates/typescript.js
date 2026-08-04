@@ -7,8 +7,8 @@
 
 /**
  * Generate TypeScript interface + helper types for one model.
- * @param {ModelSchema} schema
- * @param {object} opts
+ * @param {import('../introspect.js').ModelSchema} schema
+ * @param {{includeRelations?: boolean, includeCreateInput?: boolean, includeUpdateInput?: boolean, includeWhereInput?: boolean, strict?: boolean}} opts
  * @returns {string}
  */
 export function generateTypeScriptTypes(schema, opts = {}) {
@@ -77,8 +77,8 @@ export function generateTypeScriptTypes(schema, opts = {}) {
 
 /**
  * Generate a complete TypeScript declaration file for one or more models.
- * @param {ModelSchema[]} schemas
- * @param {object} opts
+ * @param {import('../introspect.js').ModelSchema[]} schemas
+ * @param {{header?: boolean, moduleFormat?: 'esm'|'cjs', includeRelations?: boolean, includeCreateInput?: boolean, includeUpdateInput?: boolean, includeWhereInput?: boolean, strict?: boolean}} opts
  * @returns {string}
  */
 export function generateTypeScriptFile(schemas, opts = {}) {

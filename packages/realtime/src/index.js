@@ -33,7 +33,19 @@ import { toSnakeCase } from '@eloquentjs/core'
 import { createServer } from 'http'
 import crypto from 'crypto'
 
-export function createRealtimeServer(options = {}) {
+/**
+ * @typedef {Object} RealtimeServerOptions
+ * @property {number} [port]
+ * @property {any} [server] - attach to an existing HTTP server
+ * @property {string} [appId]
+ * @property {string} [appKey] - required at runtime; throws if missing
+ * @property {string} [appSecret] - required at runtime; throws if missing
+ * @property {string} [authEndpoint]
+ * @property {number} [pingInterval]
+ */
+
+/** @param {RealtimeServerOptions} [options] */
+export function createRealtimeServer(options = /** @type {RealtimeServerOptions} */ ({})) {
     return new RealtimeServer(options)
 }
 
@@ -45,6 +57,7 @@ function timingSafeEqualStr(a, b) {
 }
 
 class RealtimeServer {
+    /** @param {RealtimeServerOptions} [options] */
     constructor({
         port = 6001,
         server = null,     // Attach to existing HTTP server
@@ -261,6 +274,10 @@ class RealtimeServer {
 
 // ─── Lightweight browser/Node client ──────────────────────────────────────
 export class RealtimeClient {
+    /**
+     * @param {string} url
+     * @param {{appKey?: string}} [options]
+     */
     constructor(url, { appKey } = {}) {
         this._url = url
         this._handlers = new Map()   // channel:event -> [fn]

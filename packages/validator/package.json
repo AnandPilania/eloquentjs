@@ -5,11 +5,26 @@
   "type": "module",
   "main": "src/index.js",
   "exports": {
-    ".": "./src/index.js",
-    "./schema": "./src/Schema.js",
-    "./rule": "./src/Rule.js",
-    "./rules": "./src/rules/index.js",
-    "./adapters": "./src/adapters/index.js"
+    ".": {
+      "types": "./dist-types/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./schema": {
+      "types": "./dist-types/Schema.d.ts",
+      "default": "./src/Schema.js"
+    },
+    "./rule": {
+      "types": "./dist-types/Rule.d.ts",
+      "default": "./src/Rule.js"
+    },
+    "./rules": {
+      "types": "./dist-types/rules/index.d.ts",
+      "default": "./src/rules/index.js"
+    },
+    "./adapters": {
+      "types": "./dist-types/adapters/index.d.ts",
+      "default": "./src/adapters/index.js"
+    }
   },
   "keywords": [
     "validation",
@@ -50,6 +65,11 @@
   },
   "files": [
     "src",
-    "README.md"
-  ]
+    "README.md",
+    "dist-types"
+  ],
+  "types": "dist-types/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  }
 }

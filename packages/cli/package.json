@@ -9,14 +9,24 @@
     "ejs": "./bin/eloquent.js"
   },
   "exports": {
-    ".": "./src/index.js",
-    "./utils": "./src/utils.js",
-    "./migration-runner": "./src/commands/migration-runner.js"
+    ".": {
+      "types": "./dist-types/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./utils": {
+      "types": "./dist-types/utils.d.ts",
+      "default": "./src/utils.js"
+    },
+    "./migration-runner": {
+      "types": "./dist-types/commands/migration-runner.d.ts",
+      "default": "./src/commands/migration-runner.js"
+    }
   },
   "files": [
     "src",
     "bin",
-    "README.md"
+    "README.md",
+    "dist-types"
   ],
   "keywords": [
     "orm",
@@ -60,5 +70,9 @@
   "homepage": "https://github.com/AnandPilania/eloquentjs#readme",
   "engines": {
     "node": ">=20.6.0"
+  },
+  "types": "dist-types/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
   }
 }

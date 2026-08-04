@@ -514,7 +514,7 @@ export class Validator extends CoreValidator {
     // ─── Helper: check if rule is "implicit" (runs on empty values) ───────────
 
     _isImplicit(rule) {
-        if (rule instanceof Rule) return rule.constructor.implicit === true
+        if (rule instanceof Rule) return /** @type {typeof Rule} */ (rule.constructor).implicit === true
         if (typeof rule === 'string') {
             return ['required', 'required_if', 'required_with', 'required_with_all',
                 'required_without', 'required_without_all', 'prohibited', 'sometimes'].includes(rule.split(':')[0])

@@ -11,6 +11,48 @@
 
 import { toSnakePlural } from '@eloquentjs/core'
 
+/**
+ * @typedef {Object} ModelSchemaField
+ * @property {string} name
+ * @property {string} [cast]
+ * @property {string} jsType
+ * @property {string} gqlType
+ * @property {string} tsType
+ * @property {Record<string, any>} openApiType
+ * @property {boolean} nullable
+ * @property {boolean} hidden
+ * @property {boolean} fillable
+ * @property {boolean} isPk
+ * @property {boolean} [isTimestamp]
+ * @property {boolean} [isSoftDelete]
+ *
+ * @typedef {Object} ModelSchemaRelation
+ * @property {string} name
+ * @property {string} type
+ * @property {string} related
+ * @property {boolean} isList
+ * @property {boolean} isPolymorphic
+ * @property {boolean} nullable
+ *
+ * @typedef {Object} ModelSchemaScope
+ * @property {string} name
+ * @property {string} methodName
+ *
+ * @typedef {Object} ModelSchema
+ * @property {string} name
+ * @property {string} table
+ * @property {string} primaryKey
+ * @property {boolean} softDeletes
+ * @property {boolean} timestamps
+ * @property {string[]} fillable
+ * @property {string[]} hidden
+ * @property {ModelSchemaField[]} fields
+ * @property {ModelSchemaRelation[]} relations
+ * @property {ModelSchemaScope[]} scopes
+ * @property {{hidden: Set<string>, disabled: Record<string, any>, subscription: boolean, middleware: any[]}} graphql
+ * @property {Function} ModelClass
+ */
+
 // ─── Cast → canonical type map ────────────────────────────────────────────────
 const CAST_TYPE_MAP = {
   // integers

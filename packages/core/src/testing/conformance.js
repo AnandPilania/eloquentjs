@@ -1,3 +1,4 @@
+/// <reference types="jest" />
 /**
  * @eloquentjs/core — Resolver conformance suite
  *

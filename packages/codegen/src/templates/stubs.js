@@ -9,8 +9,8 @@
 
 /**
  * Generate a Model class stub.
- * @param {ModelSchema} schema — from introspect() or a plain descriptor
- * @param {object} opts
+ * @param {import('../introspect.js').ModelSchema} schema — from introspect() or a plain descriptor
+ * @param {{importPath?: string, withComments?: boolean}} opts
  * @returns {string}
  */
 export function generateModelStub(schema, opts = {}) {
@@ -87,8 +87,8 @@ ${comments}
 /**
  * Generate a migration stub — either a smart template or from a full schema.
  * @param {string} name — snake_case migration name
- * @param {ModelSchema|null} schema — optional; when provided generates columns from casts
- * @param {object} opts
+ * @param {import('../introspect.js').ModelSchema|null} schema — optional; when provided generates columns from casts
+ * @param {Record<string, any>} opts
  * @returns {string}
  */
 export function generateMigrationStub(name, schema = null, opts = {}) {
