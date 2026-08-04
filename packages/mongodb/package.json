@@ -1,6 +1,6 @@
 {
   "name": "@eloquentjs/mongodb",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "MongoDB driver for EloquentJS",
   "type": "module",
   "main": "src/index.js",
@@ -11,7 +11,7 @@
     }
   },
   "dependencies": {
-    "@eloquentjs/core": "^0.0.5",
+    "@eloquentjs/core": "^0.0.6",
     "mongodb": "^7.1.0"
   },
   "license": "MIT",

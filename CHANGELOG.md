@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.0.6] — 2026-08-04
+
+### ✨ Features
+
+- add typescript support (`e2c92bf`)
+
+
+---
+
 ## [0.0.5] — 2026-07-31
 
 ### 🔧 Chores

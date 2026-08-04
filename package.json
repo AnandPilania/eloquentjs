@@ -1,6 +1,6 @@
 {
   "name": "eloquentjs",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "EloquentJS monorepo — Laravel Eloquent for Node.js",
   "private": true,
   "type": "module",
