@@ -18,6 +18,14 @@
     "name": "Anand Pilania",
     "email": "pilaniaanand@gmail.com"
   },
+  "peerDependencies": {
+    "better-sqlite3": "^11.10.0"
+  },
+  "peerDependenciesMeta": {
+    "better-sqlite3": {
+      "optional": true
+    }
+  },
   "optionalDependencies": {
     "better-sqlite3": "^11.10.0"
   },

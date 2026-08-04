@@ -11,7 +11,17 @@
     }
   },
   "dependencies": {
-    "@eloquentjs/core": "^0.0.6",
+    "@eloquentjs/core": "^0.0.6"
+  },
+  "peerDependencies": {
+    "mongodb": "^7.1.0"
+  },
+  "peerDependenciesMeta": {
+    "mongodb": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
     "mongodb": "^7.1.0"
   },
   "license": "MIT",
