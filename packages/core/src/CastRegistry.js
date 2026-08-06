@@ -16,11 +16,30 @@
  *   get(value)        — called when reading from model
  *   set(value)        — called when writing to model (mutator)
  *   serialize(value)  — called during toJSON()
+ *
+ * One instance per cast class is shared, so `this` inside a cast is stable.
  */
 
-/** @type {Map<string, {get, set, serialize}>} */
+import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
+import { Collection } from './Collection.js'
+
 /** @type {Map<string, {get: (v: any) => any, set: (v: any) => any, serialize?: (v: any) => any}>} */
 const _custom = new Map()
+
+/**
+ * One instance per cast class. Casts are stateless value objects, and
+ * instantiating on every attribute read (which is what `new handler().get(v)`
+ * did) both allocated per access and gave classes two different lifetimes
+ * depending on whether they came from register() or `static casts`.
+ * @type {Map<Function, {get: (v: any) => any, set: (v: any) => any, serialize?: (v: any) => any}>}
+ */
+const _instances = new Map()
+
+function instanceOf(CastClass) {
+  let instance = _instances.get(CastClass)
+  if (!instance) _instances.set(CastClass, instance = new CastClass())
+  return instance
+}
 
 // ─── Built-in cast definitions ────────────────────────────────────────────────
 const _builtins = {
@@ -88,6 +107,105 @@ const _builtins = {
     set: v => v,
     serialize: v => (v instanceof Buffer ? v.toString('base64') : v),
   },
+  /** An immutable Date — reads return a frozen copy, so mutation can't leak. */
+  immutable_date: {
+    get(v) {
+      const d = _builtins.date.get(v)
+      return d instanceof Date ? Object.freeze(new Date(d.getTime())) : d
+    },
+    set: v => _builtins.date.set(v),
+    serialize: v => _builtins.date.serialize(v),
+  },
+  /**
+   * A write-only hash: set() hashes, get() returns the stored hash unchanged.
+   * scrypt via node:crypto — no dependency, and `verifyHashed()` below is the
+   * matching check.
+   */
+  hashed: {
+    get: v => v,
+    set(v) {
+      if (v == null || v === '') return v
+      if (typeof v === 'string' && v.startsWith('scrypt$')) return v   // already hashed
+      const salt = randomBytes(16)
+      const hash = scryptSync(String(v), salt, 64)
+      return `scrypt$${salt.toString('base64')}$${hash.toString('base64')}`
+    },
+    serialize: () => undefined,   // never serialise a hash
+  },
+}
+
+_builtins.immutable_datetime = _builtins.immutable_date
+
+/**
+ * Verify a plaintext value against a `hashed` cast column.
+ * @param {string} plain
+ * @param {string} stored
+ */
+export function verifyHashed(plain, stored) {
+  if (typeof stored !== 'string' || !stored.startsWith('scrypt$')) return false
+  const [, salt, hash] = stored.split('$')
+  const expected = Buffer.from(hash, 'base64')
+  const actual = scryptSync(String(plain), Buffer.from(salt, 'base64'), expected.length)
+  return expected.length === actual.length && timingSafeEqual(expected, actual)
+}
+
+/**
+ * A cast backed by a plain-object or TS-style enum: stores the value, reads
+ * back only values the enum contains.
+ *   static casts = { status: AsEnum({ Draft: 'draft', Live: 'live' }) }
+ */
+export function AsEnum(enumObject) {
+  const values = new Set(Object.values(enumObject))
+  return {
+    get: v => (v == null || values.has(v) ? v : undefined),
+    set(v) {
+      if (v == null) return v
+      if (!values.has(v)) {
+        throw new Error(`[EloquentJS] "${v}" is not a valid value; expected one of ${[...values].join(', ')}`)
+      }
+      return v
+    },
+    serialize: v => v,
+  }
+}
+
+/**
+ * A JSON array column read back as a Collection — Laravel's AsCollection.
+ * Used bare, not called: `static casts = { tags: AsCollection }`
+ */
+export const AsCollection = {
+  get(v) {
+    const parsed = _builtins.json.get(v)
+    if (parsed == null) return parsed
+    return parsed instanceof Collection ? parsed : new Collection([parsed].flat())
+  },
+  set(v) {
+    if (v == null) return v
+    if (typeof v === 'string') return v
+    return JSON.stringify(v instanceof Collection ? [...v] : v)
+  },
+  // A Collection is an Array subclass, so JSON.stringify already handles it;
+  // spreading keeps toJSON() output a plain array rather than a Collection.
+  serialize(v) {
+    const parsed = AsCollection.get(v)
+    return parsed instanceof Collection ? [...parsed] : parsed
+  },
+}
+
+/**
+ * A JSON object column read back as a mutable object — the JS reading of
+ * Laravel's AsArrayObject. Null reads back as `{}` so `model.options.x = 1`
+ * never throws.
+ *
+ * ponytail: a plain object already has ArrayObject's reference semantics, so
+ * there is no wrapper class. The one thing it cannot do is notice an in-place
+ * mutation — `model.options.x = 1` will not mark the attribute dirty. Reassign
+ * (`model.options = {...model.options, x: 1}`) when you need save() to see it.
+ */
+export const AsArrayObject = {
+  get: v => _builtins.json.get(v) ?? {},
+  set: v => _builtins.json.set(v),
+  serialize: v => _builtins.json.serialize(v) ?? {},
 }
 
 // ─── Aliases ─────────────────────────────────────────────────────────────────
@@ -110,51 +228,50 @@ export const CastRegistry = {
    * @param {new (...args: any[]) => {get: (v: any) => any, set: (v: any) => any, serialize?: (v: any) => any}} CastClass  - class with get/set/serialize methods
    */
   register(name, CastClass) {
-    _custom.set(name, new CastClass())
+    _custom.set(name.toLowerCase(), instanceOf(CastClass))
   },
 
   /** Read-phase cast (model attribute access). */
   get(type, value) {
-    if (!type) return value
-    const handler = this._resolve(type)
-    if (!handler) return value
-    return typeof handler === 'object'
-      ? handler.get(value)
-      : new handler().get(value)
+    const handler = type ? this._resolve(type) : null
+    return handler ? handler.get(value) : value
   },
 
   /** Write-phase cast (attribute assignment). */
   set(type, value) {
-    if (!type) return value
-    const handler = this._resolve(type)
-    if (!handler) return value
-    return typeof handler === 'object'
-      ? handler.set(value)
-      : new handler().set(value)
+    const handler = type ? this._resolve(type) : null
+    return handler ? handler.set(value) : value
   },
 
   /** Serialization cast (toJSON). */
   serialize(type, value) {
-    if (!type) return value
-    const handler = this._resolve(type)
+    const handler = type ? this._resolve(type) : null
     if (!handler) return value
-    const fn = typeof handler === 'object'
-      ? handler.serialize ?? handler.get
-      : new handler().serialize ?? new handler().get
-    return fn(value)
+    // Bound, so a custom cast whose serialize() uses `this` works. Reading
+    // `new handler().serialize ?? new handler().get` created two instances and
+    // returned an unbound method.
+    return handler.serialize
+      ? handler.serialize(value)
+      : handler.get(value)
   },
 
+  /** @returns {{get: Function, set: Function, serialize?: Function}|null} */
   _resolve(type) {
-    // Class-based cast (constructor function)
-    if (typeof type === 'function') return type
+    // Class-based cast (constructor function) — one shared instance.
+    if (typeof type === 'function') return instanceOf(type)
+    if (type && typeof type === 'object') return type   // inline {get,set} object
+    if (typeof type !== 'string') return null
 
-    // decimal:N  syntax
-    if (typeof type === 'string' && type.startsWith('decimal:')) {
-      const places = parseInt(type.split(':')[1], 10)
+    // `decimal:N` — parsed before the alias lookup, and tolerant of a missing N.
+    if (type.startsWith('decimal:') || type === 'decimal') {
+      const places = parseInt(type.split(':')[1] ?? '2', 10) || 0
+      const round = v => (v == null ? v : parseFloat(Number(v).toFixed(places)))
       return {
-        get: v => (v == null ? v : parseFloat(Number(v).toFixed(places))),
-        set: v => (v == null ? v : parseFloat(Number(v).toFixed(places))),
-        serialize: v => (v == null ? v : parseFloat(Number(v).toFixed(places))),
+        get: round,
+        set: round,
+        // Laravel returns decimals as a fixed-precision string so they survive
+        // JSON without float drift.
+        serialize: v => (v == null ? v : Number(v).toFixed(places)),
       }
     }
 

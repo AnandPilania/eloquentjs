@@ -205,13 +205,14 @@ describe('ORDER BY / JOIN', () => {
 })
 
 describe('INSERT / UPDATE / DELETE / INCREMENT', () => {
-  test('insert() builds INSERT with ? placeholders (no RETURNING)', async () => {
+  test('insert() builds INSERT ... RETURNING with ? placeholders', async () => {
+    // RETURNING keeps insert() consistent with insertMany() and works on
+    // WITHOUT ROWID tables, where the old `WHERE rowid = ?` re-read found nothing.
     const captured = []
     const r = new SQLiteResolver(makeMockDb(captured))
     await r.insert('users', { name: 'Bob', email: 'b@b.com' })
     const insertWrite = captured.find(c => c.sql.startsWith('INSERT'))
-    expect(insertWrite.sql).toBe('INSERT INTO "users" ("name", "email") VALUES (?, ?)')
-    expect(insertWrite.sql).not.toContain('RETURNING')
+    expect(insertWrite.sql).toBe('INSERT INTO "users" ("name", "email") VALUES (?, ?) RETURNING *')
     expect(insertWrite.params).toEqual(['Bob', 'b@b.com'])
   })
 
@@ -363,10 +364,10 @@ describe('Column DEFAULT rendering', () => {
     expect(await ddl({ _default: 'active' })).toContain("DEFAULT 'active'")
   })
 
-  test("Blueprint's Postgres gen_random_uuid() is translated to a SQLite v4", async () => {
-    // SQLite has no uuid function, and `DEFAULT foo()` unparenthesized is a
-    // syntax error — emitting the pg expression verbatim breaks CREATE TABLE.
-    const sql = await ddl({ _default: 'gen_random_uuid()' })
+  test("Blueprint's portable uuid marker is rendered as a SQLite v4", async () => {
+    // Core emits {expr:'uuid'} rather than driver SQL; SQLite has no uuid
+    // function, and `DEFAULT foo()` unparenthesized is a syntax error.
+    const sql = await ddl({ _default: { expr: 'uuid' } })
     expect(sql).not.toContain('gen_random_uuid')
     expect(sql).toContain('randomblob')
     expect(sql).toMatch(/DEFAULT \(lower\(hex\(randomblob/)

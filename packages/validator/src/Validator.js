@@ -2,8 +2,8 @@
  * @eloquentjs/validator — Validator
  *
  * Extends @eloquentjs/core's Validator with:
- *   - Async validation (validateAsync / failsAsync)
- *   - Nested field validation (address.city, items.*.name)
+ *   - Nested field validation (address.city, items.*.name — real expansion)
+ *   - after() hooks and addError()
  *   - Rule object support (new UniqueRule(), new ExistsRule())
  *   - Conditional rules (sometimes, required_with, required_without_all)
  *   - More built-in rules: digits, ip, json, starts_with, ends_with, size,
@@ -15,21 +15,18 @@
  *   - Stops at first rule failure per field by default (bail)
  */
 
-import { Validator as CoreValidator, ValidationException } from '@eloquentjs/core'
+import { Validator as CoreValidator } from '@eloquentjs/core'
 import { Rule } from './Rule.js'
+
+/** Rule names that need a database round trip; only validateAsync() runs them. */
+const ASYNC_RULE_NAMES = ['unique', 'exists']
 
 export class Validator extends CoreValidator {
     constructor(data, rules, messages = {}, attributes = {}) {
-        super(data, rules, messages)
-        this._attributes = attributes  // custom field display names
+        super(data, rules, messages, attributes)
         this._sometimes = new Set()   // fields that only validate when present
         this._bail = false       // stop all validation on first failure
-    }
-
-    // ─── Factory ──────────────────────────────────────────────────────────────
-
-    static make(data, rules, messages = {}, attributes = {}) {
-        return new Validator(data, rules, messages, attributes)
+        this._afterHooks = []
     }
 
     /**
@@ -49,6 +46,22 @@ export class Validator extends CoreValidator {
         return this
     }
 
+    /**
+     * Register a callback run after the rules pass. Receives the validator, so
+     * it can add errors: `v.after(v => { if (bad) v.addError('x', 'nope') })`
+     */
+    after(callback) {
+        this._afterHooks.push(callback)
+        return this
+    }
+
+    addError(field, message) {
+        if (!this.errors[field]) this.errors[field] = []
+        this.errors[field].push(message)
+        this._passed = false
+        return this
+    }
+
     // ─── Sync validation ───────────────────────────────────────────────────────
 
     validate() {
@@ -58,16 +71,49 @@ export class Validator extends CoreValidator {
             // 'sometimes' — skip if field not present in data
             if (this._sometimes.has(field) && !this._hasValue(field)) continue
 
-            // Expand dot-notation fields
-            const fieldErrors = this._validateField(field, ruleList)
-            if (fieldErrors.length) {
-                this.errors[field] = fieldErrors
-                if (this._bail) break
+            for (const [expanded, rules] of this._expandField(field, ruleList)) {
+                const fieldErrors = this._validateField(expanded, rules)
+                if (fieldErrors.length) {
+                    this.errors[expanded] = fieldErrors
+                    if (this._bail) break
+                }
             }
+            if (this._bail && Object.keys(this.errors).length) break
         }
 
         this._passed = Object.keys(this.errors).length === 0
+        if (this._passed) this._runAfterHooks()
         return this._passed
+    }
+
+    _runAfterHooks() {
+        for (const hook of this._afterHooks) hook(this)
+        this._passed = Object.keys(this.errors).length === 0
+        return this._passed
+    }
+
+    /**
+     * Expand a wildcard path into the concrete paths present in the data:
+     * 'items.*.price' → ['items.0.price', 'items.1.price'].
+     * The header advertised this; _getValue used to walk a literal '*' key and
+     * return undefined, so wildcard rules never ran.
+     * @returns {[string, any[]][]}
+     */
+    _expandField(field, ruleList) {
+        if (!field.includes('*')) return [[field, ruleList]]
+
+        const at = field.indexOf('*')
+        const prefix = field.slice(0, at).replace(/\.$/, '')
+        const suffix = field.slice(at + 1).replace(/^\./, '')
+        const container = prefix ? this._getValue(prefix) : this.data
+
+        if (container == null || typeof container !== 'object') return []
+        const keys = Array.isArray(container) ? container.map((_, i) => String(i)) : Object.keys(container)
+
+        return keys.flatMap(key => {
+            const path = [prefix, key, suffix].filter(Boolean).join('.')
+            return this._expandField(path, ruleList)
+        })
     }
 
     // ─── Async validation ─────────────────────────────────────────────────────
@@ -82,34 +128,19 @@ export class Validator extends CoreValidator {
         for (const [field, ruleList] of Object.entries(this.rules)) {
             if (this._sometimes.has(field) && !this._hasValue(field)) continue
 
-            const fieldErrors = await this._validateFieldAsync(field, ruleList)
-            if (fieldErrors.length) {
-                this.errors[field] = fieldErrors
-                if (this._bail) break
+            for (const [expanded, rules] of this._expandField(field, ruleList)) {
+                const fieldErrors = await this._validateFieldAsync(expanded, rules)
+                if (fieldErrors.length) {
+                    this.errors[expanded] = fieldErrors
+                    if (this._bail) break
+                }
             }
+            if (this._bail && Object.keys(this.errors).length) break
         }
 
         this._passed = Object.keys(this.errors).length === 0
+        if (this._passed) this._runAfterHooks()
         return this._passed
-    }
-
-    async passesAsync() { return this.validateAsync() }
-    async failsAsync() { return !(await this.validateAsync()) }
-
-    /**
-     * Like validated() but runs async validation first.
-     * @returns {Promise<object>} — validated data subset
-     */
-    async validatedAsync() {
-        await this.validateAsync()
-        if (!this._passed) throw new ValidationException(this.errors)
-        return this._extractValidated()
-    }
-
-    validated() {
-        if (this._passed === null) this.validate()
-        if (!this._passed) throw new ValidationException(this.errors)
-        return this._extractValidated()
     }
 
     // ─── Field error extraction ────────────────────────────────────────────────
@@ -118,8 +149,16 @@ export class Validator extends CoreValidator {
         const errors = []
         const value = this._getValue(field)
 
+        // `nullable` short-circuits the whole field — see CoreValidator.
+        if (this._isEmpty(value) && this._hasRule(ruleList, 'nullable') && !this._hasRule(ruleList, 'required')) {
+            return errors
+        }
+
         for (const rule of ruleList) {
             if (rule === 'bail') { /* local bail — stop this field on first error (default anyway) */ break }
+
+            const [name] = CoreValidator.parseRule(rule)
+            if (ASYNC_RULE_NAMES.includes(name)) continue   // validateAsync() handles these
 
             // Skip non-implicit rules when value is empty (unless required)
             if (this._isEmpty(value) && !this._isImplicit(rule) && !this._isRequiredRule(rule)) {
@@ -137,7 +176,9 @@ export class Validator extends CoreValidator {
     }
 
     async _validateFieldAsync(field, ruleList) {
-        const errors = []
+        const errors = this._validateField(field, ruleList)
+        if (errors.length) return errors
+
         const value = this._getValue(field)
 
         for (const rule of ruleList) {
@@ -154,9 +195,9 @@ export class Validator extends CoreValidator {
                 const passed = await rule.passesAsync(field, value, this.data)
                 if (!passed) error = rule.formatMessage(this._displayName(field), value)
             } else {
-                // String rule — check if it's unique/exists (async by name)
-                error = await this._checkAsyncStringRule(field, value, rule)
-                    ?? this._checkExtended(field, value, rule)
+                const [name, param] = CoreValidator.parseRule(rule)
+                if (!ASYNC_RULE_NAMES.includes(name)) continue
+                error = await this._checkAsync(field, value, name, param)
             }
 
             if (error) {
@@ -182,7 +223,7 @@ export class Validator extends CoreValidator {
             return rule(field, value, this.data) ?? null
         }
 
-        const [name, param] = String(rule).split(/:(.+)/)
+        const [name, param] = CoreValidator.parseRule(String(rule))
         const displayField = this._displayName(field)
 
         switch (name) {
@@ -320,16 +361,16 @@ export class Validator extends CoreValidator {
             }
 
             case 'ip': {
-                const ipv4 = /^(\d{1,3}\.){3}\d{1,3}$/
                 const ipv6 = /^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$/
-                if (value != null && !ipv4.test(String(value)) && !ipv6.test(String(value))) {
+                if (value != null && !isIPv4(value) && !ipv6.test(String(value))) {
                     return this._msg(field, 'ip', `The ${displayField} must be a valid IP address.`)
                 }
                 break
             }
 
             case 'ipv4':
-                if (value != null && !/^(\d{1,3}\.){3}\d{1,3}$/.test(String(value))) {
+                // The old regex accepted 999.999.999.999 — each octet has to be 0-255.
+                if (value != null && !isIPv4(value)) {
                     return this._msg(field, 'ipv4', `The ${displayField} must be a valid IPv4 address.`)
                 }
                 break
@@ -368,33 +409,35 @@ export class Validator extends CoreValidator {
                 break
             }
 
+            // before/after accept a date literal OR another field name, as
+            // Laravel's do ('before:end_date').
             case 'before': {
-                const d = new Date(param)
-                if (value != null && new Date(value) >= d) {
+                const d = this._resolveDate(param)
+                if (value != null && d && new Date(value) >= d) {
                     return this._msg(field, 'before', `The ${displayField} must be a date before ${param}.`)
                 }
                 break
             }
 
             case 'after': {
-                const d = new Date(param)
-                if (value != null && new Date(value) <= d) {
+                const d = this._resolveDate(param)
+                if (value != null && d && new Date(value) <= d) {
                     return this._msg(field, 'after', `The ${displayField} must be a date after ${param}.`)
                 }
                 break
             }
 
             case 'before_or_equal': {
-                const d = new Date(param)
-                if (value != null && new Date(value) > d) {
+                const d = this._resolveDate(param)
+                if (value != null && d && new Date(value) > d) {
                     return this._msg(field, 'before_or_equal', `The ${displayField} must be a date before or equal to ${param}.`)
                 }
                 break
             }
 
             case 'after_or_equal': {
-                const d = new Date(param)
-                if (value != null && new Date(value) < d) {
+                const d = this._resolveDate(param)
+                if (value != null && d && new Date(value) < d) {
                     return this._msg(field, 'after_or_equal', `The ${displayField} must be a date after or equal to ${param}.`)
                 }
                 break
@@ -432,70 +475,39 @@ export class Validator extends CoreValidator {
                 break
             }
 
-            // unique/exists are async — skip in sync path
-            case 'unique':
-            case 'exists':
-                break
-
             default:
-                // Delegate all remaining rules (including 'required' and core rules) to the
-                // parent class so there is a single implementation for each rule name.
-                const error = super._check(field, value, rule);
-
-                // We need to run it through our _msg logic to replace :field or raw field names.
-                if (typeof error === 'string') {
-                    // We use our overridden _msg to handle the :field replacement,
-                    // but since the core validator already returned a full string,
-                    // we just need to make sure the raw field name is swapped out.
-                    return error
-                        .replace(new RegExp(field, 'g'), displayField)
-                        .replace(new RegExp(field.replace(/_/g, ' '), 'g'), displayField);
-                }
-
-                return error;
+                // Delegate everything else — including 'required' and the core
+                // rules — to the parent, so each rule name has exactly one
+                // implementation. Core already formats via _displayName, so no
+                // post-hoc field-name substitution is needed (the old
+                // `new RegExp(field)` was both wrong for regex metacharacters in
+                // field names and a latent ReDoS).
+                return super._check(field, value, rule)
         }
 
         return null
     }
 
-    // ─── Async string rules (unique, exists) ──────────────────────────────────
-
-    async _checkAsyncStringRule(field, value, rule) {
-        if (typeof rule !== 'string') return null
-        const [name, param] = rule.split(/:(.+)/)
-        const displayField = this._displayName(field)
-
-        if (name === 'unique') {
-            const [table, col = field] = (param ?? '').split(',')
-            const { UniqueRule } = await import('./Rule.js')
-            const r = new UniqueRule(table.trim(), col.trim())
-            const passed = await r.passesAsync(field, value, this.data)
-            if (!passed) return this._msg(field, 'unique', `The ${displayField} has already been taken.`)
-        }
-
-        if (name === 'exists') {
-            const [table, col = 'id'] = (param ?? '').split(',')
-            const { ExistsRule } = await import('./Rule.js')
-            const r = new ExistsRule(table.trim(), col.trim())
-            const passed = await r.passesAsync(field, value, this.data)
-            if (!passed) return this._msg(field, 'exists', `The selected ${displayField} is invalid.`)
-        }
-
-        return null
+    /** A date literal, or the value of another field. */
+    _resolveDate(param) {
+        const other = this._getValue(param)
+        const source = other !== undefined ? other : param
+        const d = new Date(source)
+        return isNaN(d.getTime()) ? null : d
     }
 
     // ─── Nested field support ─────────────────────────────────────────────────
 
     /**
-     * Get a value by dot-notation path, supporting wildcard * for arrays.
+     * Get a value by dot-notation path. Wildcards are expanded to concrete
+     * paths by _expandField() before this is called.
      * 'address.city'  → data.address.city
      * 'items.0.name'  → data.items[0].name
      */
     _getValue(field) {
-        if (!field.includes('.')) return this.data[field]
-        const parts = field.split('.')
+        if (typeof field !== 'string' || !field.includes('.')) return this.data?.[field]
         let current = this.data
-        for (const part of parts) {
+        for (const part of field.split('.')) {
             if (current == null) return undefined
             current = current[part]
         }
@@ -505,10 +517,6 @@ export class Validator extends CoreValidator {
     _hasValue(field) {
         const v = this._getValue(field)
         return v !== undefined && v !== null && v !== ''
-    }
-
-    _isEmpty(value) {
-        return value === undefined || value === null || value === ''
     }
 
     // ─── Helper: check if rule is "implicit" (runs on empty values) ───────────
@@ -526,32 +534,12 @@ export class Validator extends CoreValidator {
         if (typeof rule !== 'string') return false
         return rule.startsWith('required')
     }
+}
 
-    // ─── Custom attribute display names ───────────────────────────────────────
-
-    _displayName(field) {
-        return this._attributes[field] ?? field.replace(/_/g, ' ')
-    }
-
-    // ─── Override _msg to support :field placeholder ──────────────────────────
-
-    _msg(field, rule, fallback) {
-        const msg = this.messages[`${field}.${rule}`]
-            ?? this.messages[rule]
-            ?? fallback
-        return msg
-            .replace(/:field/g, this._displayName(field))
-            .replace(/:attribute/g, this._displayName(field))
-    }
-
-    _extractValidated() {
-        const out = {}
-        for (const key of Object.keys(this.rules)) {
-            const value = this._getValue(key)
-            if (value !== undefined) out[key] = value
-        }
-        return out
-    }
+/** Strict IPv4: four octets, each 0-255. */
+function isIPv4(value) {
+    const parts = String(value).split('.')
+    return parts.length === 4 && parts.every(p => /^\d{1,3}$/.test(p) && Number(p) <= 255)
 }
 
 // ─── Convenience: validate() standalone function ──────────────────────────────

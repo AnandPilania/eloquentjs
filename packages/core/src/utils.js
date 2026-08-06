@@ -3,6 +3,13 @@
  *
  * Single source of truth for all string transformations used across the
  * monorepo.  Import from here; do NOT re-declare locally in other packages.
+ *
+ * This rule was broken in four places at once: @eloquentjs/graphql, the
+ * codegen GraphQL/OpenAPI templates and @eloquentjs/realtime each had their own
+ * `+ 's'` pluraliser, so REST said `/categories` while GraphQL said `categorys`
+ * and the WebSocket channel was `categorys` too. They all call
+ * `toSnakePlural()` now — including Model's Proxy, which had an inline
+ * `toPascal` that disagreed with `toPascalCase` on hyphenated keys.
  */
 
 /**
@@ -64,6 +71,54 @@ export function toCamelCase(str) {
  */
 export function toKebabCase(str) {
     return toSnakeCase(str).replace(/_/g, '-')
+}
+
+/**
+ * The only comparison operators that may reach a driver's SQL string.
+ * Drivers interpolate the operator (it cannot be a bound parameter), so this
+ * whitelist is the boundary that keeps `where(col, req.query.op, v)` from
+ * becoming an injection point. Same list Laravel's Builder enforces.
+ */
+export const SQL_OPERATORS = new Set([
+    '=', '<', '>', '<=', '>=', '<>', '!=', '<=>',
+    'LIKE', 'NOT LIKE', 'ILIKE', 'NOT ILIKE', 'LIKE BINARY',
+    '&', '|', '^', '<<', '>>', '&~',
+    'RLIKE', 'NOT RLIKE', 'REGEXP', 'NOT REGEXP',
+    '~', '~*', '!~', '!~*', 'SIMILAR TO', 'NOT SIMILAR TO',
+])
+
+/**
+ * Normalise and validate a comparison operator.
+ * @param {string} operator
+ * @returns {string} the canonical upper-case operator
+ * @throws {Error} when the operator is not whitelisted
+ */
+export function assertOperator(operator) {
+    if (typeof operator !== 'string') {
+        throw new Error(`[EloquentJS] Invalid operator: ${JSON.stringify(operator)}`)
+    }
+    const op = operator.trim().toUpperCase().replace(/\s+/g, ' ')
+    if (!SQL_OPERATORS.has(op)) {
+        throw new Error(
+            `[EloquentJS] Unsupported operator "${operator}". ` +
+            `Allowed: ${[...SQL_OPERATORS].join(', ')}. Use whereRaw() for anything else.`
+        )
+    }
+    return op
+}
+
+/**
+ * Canonical constraint names, shared by every driver so that a migration
+ * written against one and rolled back against another still matches.
+ *   users + email          → users_email_index / users_email_unique
+ *   posts + user_id        → posts_user_id_foreign
+ */
+export function indexName(table, { columns = [], type = 'index' } = {}) {
+    return `${table}_${columns.join('_')}_${type}`
+}
+
+export function foreignKeyName(table, column) {
+    return `${table}_${column}_foreign`
 }
 
 /**

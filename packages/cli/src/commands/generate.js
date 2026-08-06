@@ -15,12 +15,11 @@
  *   eloquent generate:openapi --out=docs/openapi.json
  */
 
-import { resolve, join } from 'path'
-import { writeFileSync, mkdirSync, existsSync } from 'fs'
+import { resolve } from 'path'
 import { colors, success, info, warn, error, resolveConfig } from '../utils.js'
 
 export async function cmdGenerate(ctx) {
-    const { cwd, flags, positional } = ctx
+    const { flags, positional } = ctx
     // command is e.g. 'generate:graphql', 'generate:types', 'generate:openapi'
     const subcommand = ctx.subcommand ?? flags.type ?? positional[0]
 

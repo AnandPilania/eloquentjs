@@ -1,12 +1,13 @@
 /**
  * @eloquentjs/validator — Public API
  *
- * Three ways to validate:
+ * Five ways to validate:
  *
- * 1. Laravel-style rules object (compatible with @eloquentjs/core Validator):
+ * 1. Laravel-style rules, as an array or the pipe string (this subclasses
+ *    @eloquentjs/core's Validator, so every rule has one implementation):
  *    import { Validator } from '@eloquentjs/validator'
- *    const v = Validator.make(data, { email: ['required', 'email'] })
- *    if (v.fails()) throw new Error()
+ *    const v = Validator.make(data, { email: 'required|email' })
+ *    if (v.fails()) throw new ValidationException(v.errors)
  *
  * 2. Fluent schema API (like Zod):
  *    import { v } from '@eloquentjs/validator'
@@ -21,10 +22,16 @@
  *    import { expressValidate } from '@eloquentjs/validator/adapters'
  *    router.post('/users', expressValidate(rules), handler)
  *
- * 5. DB-backed rules (async):
+ * 5. DB-backed rules. `unique` and `exists` hit the database, so they only run
+ *    under validateAsync()/validatedAsync() — the sync path skips them rather
+ *    than reporting them as passed. They no longer fail open: a database error
+ *    surfaces instead of being swallowed into "valid".
  *    import { Rule } from '@eloquentjs/validator'
  *    const rules = { email: ['required', 'email', Rule.unique('users', 'email')] }
  *    await Validator.make(data, rules).validatedAsync()
+ *
+ *    // Or as a string rule: unique:table,column[,ignoreId[,ignoreColumn]]
+ *    { email: ['required', `unique:users,email,${user.id}`] }
  */
 
 // Core Validator (extends @eloquentjs/core Validator)

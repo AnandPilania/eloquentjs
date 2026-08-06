@@ -6,6 +6,13 @@
  *   const result = await Pipeline.send(data)
  *     .through(ValidateStep, SanitizeStep, async d => ({ ...d, processed: true }))
  *     .thenReturn()
+ *
+ * A pipe is a function `d => next`, or a class/object with `handle(d)`.
+ *
+ * Note on naming: `then()` here is the promise protocol, so the pipeline can be
+ * awaited directly. Laravel's `->then(destination)` — run the pipes, then hand
+ * the result to a final callback — is `thenTo()` below, because the two cannot
+ * share a name on a thenable.
  */
 export class Pipeline {
   static send(payload) { return new Pipeline(payload) }
@@ -45,6 +52,16 @@ export class Pipeline {
     return value
   }
 
+  /**
+   * Run the pipes, then pass the result to a final destination.
+   * Laravel spells this `->then(fn)`; see the note at the top of the file.
+   * @param {(value: any) => any} destination
+   */
+  async thenTo(destination) {
+    return destination(await this.thenReturn())
+  }
+
+  // The promise protocol, so `await Pipeline.send(x).through(...)` works.
   then(resolve, reject) {
     return this.thenReturn().then(resolve, reject)
   }

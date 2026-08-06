@@ -6,6 +6,10 @@
  * Model:updating, Model:updated, Model:deleting, Model:deleted, Model:retrieved
  */
 
+// The canonical event list lives with the dispatcher. Cyclic by design:
+// HookRegistry fires through this bus.
+import { EVENTS } from './HookRegistry.js'
+
 const _listeners = new Map()
 
 export const EventEmitter = {
@@ -40,31 +44,35 @@ export const EventEmitter = {
 
   /**
    * Fire all listeners for an event sequentially (await each).
+   * @returns {Promise<boolean>} false as soon as a listener returns exactly
+   * false — how a "-ing" model event cancels the operation.
    */
   async emit(event, ...args) {
     const listeners = _listeners.get(event) ?? []
     for (const fn of listeners) {
-      await fn(...args)
+      if ((await fn(...args)) === false) return false
     }
+    return true
   },
 
   /** Alias for on() — mirrors Laravel syntax */
   listen: function (event, listener) { return this.on(event, listener) },
 
   /**
-   * Register a full observer object against a Model class.
-   * The observer may define: creating, created, updating, updated,
-   * deleting, deleted, retrieved, restoring, restored
+   * Register an observer against the *string bus* — `${ModelClass.name}:event`.
+   * Prefer `Model.observe(observer)` / `HookRegistry.observe()`, which key on
+   * the class reference and so survive minification and duplicate class names.
+   * Kept because the bus is also usable without a model at all.
+   * @param {Function} ModelClass
+   * @param {Record<string, Function>} observer
    */
   observe(ModelClass, observer) {
-    const name = ModelClass.name
-    const events = ['creating','created','updating','updated',
-                    'deleting','deleted','retrieved','restoring','restored']
-    for (const event of events) {
+    for (const event of EVENTS) {
       if (typeof observer[event] === 'function') {
-        this.on(`${name}:${event}`, model => observer[event](model))
+        this.on(`${ModelClass.name}:${event}`, model => observer[event](model))
       }
     }
+    return this
   },
 
   flush(event) { _listeners.delete(event) },

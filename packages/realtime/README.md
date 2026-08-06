@@ -54,8 +54,12 @@ app.post('/broadcasting/auth', rt.authHandler(async (req, socketId, channel) => 
 
 ## Client (Browser / Node)
 
+Import from the `./client` subpath. It is browser-safe: it pulls in nothing from
+Node, and uses the platform `WebSocket` in a browser and the `ws` package under
+Node.
+
 ```js
-import { RealtimeClient } from '@eloquentjs/realtime'
+import { RealtimeClient } from '@eloquentjs/realtime/client'
 
 const client = new RealtimeClient('ws://localhost:6001')
 
@@ -65,12 +69,23 @@ client.subscribe('users')
   .on('updated', user => console.log('Updated:', user))
   .on('deleted', data => console.log('Deleted ID:', data))
 
+// Or bind several events at once
+client.subscribe('users', {
+  created: user => console.log('New user:', user),
+  updated: user => console.log('Updated:', user),
+})
+
 // Per-record channel
 client.subscribe('users.42')
   .on('updated', user => renderUserCard(user))
 
-// Private channels (requires server auth)
-client.private('orders.123')
+// Private channels need a signature, so the client needs an authEndpoint.
+// Without one the server rejects the subscription.
+const authed = new RealtimeClient('ws://localhost:6001', {
+  authEndpoint: '/broadcasting/auth',
+  authHeaders: { Authorization: `Bearer ${token}` },
+})
+authed.private('orders.123')
   .on('updated', order => updateOrderUI(order))
 
 // Presence channels
@@ -79,6 +94,10 @@ client.presence('chat.room.1')
   .on('pusher_internal:member_removed', m => removeUserFromList(m))
   .on('message', msg => addChatMessage(msg))
 
+// Client-to-client events. The server only relays names prefixed `client-`,
+// only on private/presence channels, and only from a subscribed sender.
+client.private('chat.1').trigger('client-typing', { user: 'alice' })
+
 // Unsubscribe from a channel
 const sub = client.subscribe('posts')
 sub.unsubscribe()
@@ -86,6 +105,18 @@ sub.unsubscribe()
 // Fully disconnect — cancels reconnect timer, clears all handlers
 client.disconnect()
 ```
+
+### Security notes
+
+- `broadcastFrom(User)` publishes `user.toJSON()` on a **public** channel. Pass
+  `{ private: true }` (or a `private-`/`presence-` channel name) for anything
+  that isn't world-readable, and use `transform` to trim the payload.
+- `authHandler(cb)` denies unless `cb` returns something truthy. Returning
+  `false`, `null` or `undefined` is a rejection; return `true`, or a
+  `channel_data` object for presence channels.
+- One socket may join at most `maxChannelsPerSocket` channels (default 100).
+- `await server.close()` removes the model-event listeners, terminates the
+  sockets and closes the HTTP server it created.
 
 ### Automatic Reconnect
 

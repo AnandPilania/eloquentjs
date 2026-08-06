@@ -11,7 +11,7 @@
     }
   },
   "dependencies": {
-    "@eloquentjs/core": "^0.0.7"
+    "@eloquentjs/core": ">=0.0.7 <0.1.0"
   },
   "peerDependencies": {
     "express": "^4.0.0 || ^5.0.0",
@@ -32,7 +32,8 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/AnandPilania/eloquentjs.git"
+    "url": "git+https://github.com/AnandPilania/eloquentjs.git",
+    "directory": "packages/api"
   },
   "bugs": {
     "url": "https://github.com/AnandPilania/eloquentjs/issues"
@@ -48,6 +49,7 @@
   ],
   "types": "dist-types/index.d.ts",
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json",
+    "prepublishOnly": "npm run build"
   }
 }

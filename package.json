@@ -1,7 +1,7 @@
 {
   "name": "eloquentjs",
   "version": "0.0.7",
-  "description": "EloquentJS monorepo — Laravel Eloquent for Node.js",
+  "description": "EloquentJS monorepo \u2014 Laravel Eloquent for Node.js",
   "private": true,
   "type": "module",
   "author": {
@@ -40,7 +40,7 @@
     "test:unit": "node --experimental-vm-modules node_modules/jest/bin/jest.js tests/unit --runInBand --forceExit",
     "test:coverage": "node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage --runInBand --forceExit",
     "test:ci": "node --experimental-vm-modules node_modules/jest/bin/jest.js tests/unit --ci --runInBand --forceExit --no-coverage",
-    "lint": "node scripts/lint.js",
+    "lint": "eslint packages scripts tests && node scripts/lint.js",
     "build": "npm run build --workspaces --if-present",
     "eloquent": "node packages/cli/bin/eloquent.js",
     "sync": "node scripts/sync-metadata.js",
@@ -60,12 +60,16 @@
     "publish:dry": "node scripts/publish.js --dry-run",
     "check:versions": "node scripts/check-versions.js",
     "prerelease:alpha": "node scripts/release.js alpha --preminc",
-    "prerelease:beta": "node scripts/release.js beta --preminc"
+    "prerelease:beta": "node scripts/release.js beta --preminc",
+    "lint:fix": "eslint packages scripts tests --fix",
+    "typecheck": "npm run build",
+    "check": "npm run lint && npm run typecheck && npm test"
   },
   "devDependencies": {
     "@faker-js/faker": "^8.4.1",
     "@types/jest": "^30.0.0",
     "@types/node": "^26.1.2",
+    "eslint": "^9.39.5",
     "glob": "^10.5.0",
     "jest": "^29.7.0",
     "rimraf": "^6.0.1",

@@ -15,6 +15,8 @@ const TOPICS = {
     quickStart: `
 class User extends Model {
   static table    = 'users'
+  // guarded defaults to ['*'], so NOTHING is mass-assignable until fillable
+  // is declared. Same default as Laravel.
   static fillable = ['name', 'email', 'password']
   static hidden   = ['password']
   static casts    = { is_admin: 'boolean', settings: 'json', born_at: 'date' }
@@ -27,9 +29,17 @@ class User extends Model {
   getFullNameAttribute()  { return \`\${this.first_name} \${this.last_name}\` }
   setPasswordAttribute(v) { return bcrypt.hashSync(v, 10) }
 
-  static scopeActive(qb) { return qb.where('active', true) }
+  static scopeActive(qb) { return qb.where('active', true) }   // User.scope('active')
+
+  // Returning false from a "-ing" hook cancels the operation
   static async creating(user) { user.uuid = crypto.randomUUID() }
-}`,
+  static async updating(user) { if (user.locked) return false }
+}
+
+// What the last save() actually wrote (isDirty() is pending changes)
+await user.save()
+user.wasChanged('name')
+user.getChanges()   // { name: { from: 'old', to: 'new' } }`,
     seeAlso: ['query-builder', 'relations', 'casts', 'scopes', 'hooks'],
   },
 
@@ -82,12 +92,26 @@ await User.with('posts', 'profile').get()
 await User.with('posts.comments.author').get()
 await User.with({ posts: qb => qb.where('published', true) }).get()
 
-// BelongsToMany pivot
+// A relation IS a query builder — every method constrains the DB query
+await user.posts().where('published', true).latest().limit(5).get()
+await user.posts().paginate(1, 20)
+await user.posts().count()
+
+// Relationship queries
+await User.whereHas('posts', qb => qb.where('published', true)).get()
+await User.whereDoesntHave('posts').get()
+const users = await User.withCount('posts').get()   // users[0].posts_count
+
+// BelongsToMany pivot — pivot data lives on a relation accessor, not an attribute
 await user.roles().attach(roleId, { assigned_at: new Date() })
-await user.roles().detach(roleId)
-await user.roles().sync([1, 2, 3])
-const roles = await user.roles()
-console.log(roles[0]._pivot.assigned_at)`,
+await user.roles().detach(roleId)          // or detach([1, 2])
+await user.roles().sync([1, 2, 3])         // or sync({ 1: { role: 'owner' } })
+const roles = await user.roles().withPivot('assigned_at').get()
+console.log(roles[0].pivot.assigned_at)
+
+// Register morph aliases so renaming a class can't orphan polymorphic rows
+import { ModelRegistry } from '@eloquentjs/core'
+ModelRegistry.morphMap({ post: Post, user: User })`,
     seeAlso: ['model', 'query-builder'],
   },
 
@@ -208,18 +232,25 @@ await Post.where('id', 1).withTrashed().first()`,
 
   validation: {
     summary: 'Validate any data with Laravel-style rules, fluent schema API, and async DB checks.',
-    description: 'Use @eloquentjs/validator for full validation. Core Validator handles simple sync cases.',
+    description: '@eloquentjs/validator subclasses core\'s Validator, so each rule has one implementation. unique/exists need the async path.',
     quickStart: `
-import { Validator } from '@eloquentjs/validator'
-import { v, Rule } from '@eloquentjs/validator'
+import { Validator, v, Rule } from '@eloquentjs/validator'
 
-// Laravel-style rules
+// Laravel-style rules — array or the pipe string
 const validator = Validator.make(data, {
   name:  ['required', 'string', 'min:2', 'max:100'],
   email: ['required', 'email', Rule.unique('users', 'email')],
-  age:   ['required', 'integer', 'min:18'],
+  bio:   'nullable|string',          // empty -> the rest is skipped
+  age:   ['required', 'integer', 'min:18'],   // numeric, not string length
 })
+
+// unique/exists query the database, so use the async path. A sync validate()
+// SKIPS them rather than reporting them as passed, and an unknown rule throws.
 const result = await validator.validatedAsync()
+if (await validator.failsAsync()) console.log(validator.errors)
+
+// Wildcards expand to the rows actually present
+Validator.make(body, { 'items.*.price': ['required', 'numeric'] })
 
 // Fluent schema API
 const schema = v.schema({
@@ -461,17 +492,32 @@ if (user.relationLoaded('posts')) {
 }`,
 
   transactions: `
-import { transaction } from '@eloquentjs/pgsql'
+import { DB } from '@eloquentjs/core'
 
-// All operations share one connection.
-// Any thrown error triggers automatic ROLLBACK.
-await transaction(async () => {
+// Driver-agnostic. Every model write inside — including in anything the
+// callback awaits — runs on the transaction's connection.
+await DB.transaction(async () => {
   const user  = await User.create({ name: 'Alice', email: 'a@b.com' })
   const role  = await Role.where('name', 'admin').firstOrFail()
   await user.roles().attach(role.id)
   await user.profile().create({ bio: 'New user' })
-  // If this throws → ROLLBACK is called automatically
-})`,
+  // If anything throws → ROLLBACK, and none of the above is durable
+})
+
+await DB.transaction(callback, 'primary')   // a named connection
+DB.inTransaction()                          // true inside the callback
+
+// Nested calls become savepoints: an inner failure rolls back only its own work
+await DB.transaction(async () => {
+  await Account.create({ name: 'outer' })
+  try {
+    await DB.transaction(async () => { throw new Error('inner') })
+  } catch { /* 'outer' survives */ }
+})
+
+// The per-driver export is equivalent and hands you the transaction resolver
+import { transaction } from '@eloquentjs/pgsql'
+await transaction(async (tx) => { await tx.raw('SET LOCAL statement_timeout = 5000') })`,
 
   'soft-deletes': `
 class Post extends Model {

@@ -37,13 +37,13 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "@eloquentjs/core": "^0.0.7",
-    "@eloquentjs/codegen": "^0.0.7"
+    "@eloquentjs/core": ">=0.0.7 <0.1.0",
+    "@eloquentjs/codegen": ">=0.0.7 <0.1.0"
   },
   "peerDependencies": {
-    "@eloquentjs/pgsql": "^0.0.7",
-    "@eloquentjs/mongodb": "^0.0.7",
-    "@eloquentjs/sqlite": "^0.0.7"
+    "@eloquentjs/pgsql": ">=0.0.7 <0.1.0",
+    "@eloquentjs/mongodb": ">=0.0.7 <0.1.0",
+    "@eloquentjs/sqlite": ">=0.0.7 <0.1.0"
   },
   "peerDependenciesMeta": {
     "@eloquentjs/pgsql": {
@@ -62,7 +62,8 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/AnandPilania/eloquentjs.git"
+    "url": "git+https://github.com/AnandPilania/eloquentjs.git",
+    "directory": "packages/cli"
   },
   "bugs": {
     "url": "https://github.com/AnandPilania/eloquentjs/issues"
@@ -73,6 +74,7 @@
   },
   "types": "dist-types/index.d.ts",
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json",
+    "prepublishOnly": "npm run build"
   }
 }

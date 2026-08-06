@@ -688,3 +688,46 @@ describe('colors', () => {
     expect(colored).toContain('\x1b[0m')
   })
 })
+
+// ─── The entry point is importable ────────────────────────────────────────────
+
+describe('src/index.js is a library, not a script', () => {
+  test('importing it exposes run() and does not execute anything', async () => {
+    // `import '@eloquentjs/cli'` used to parse argv, run a command and call
+    // process.exit() at module scope, terminating the host process.
+    const mod = await import('../../packages/cli/src/index.js')
+    expect(typeof mod.run).toBe('function')
+    expect(typeof mod.version).toBe('function')
+    expect(mod.COMMANDS).toHaveProperty('migrate')
+  })
+
+  test('run() reports an unknown command with exit code 1 instead of exiting', async () => {
+    const { run } = await import('../../packages/cli/src/index.js')
+    const err = jest.spyOn(console, 'error').mockImplementation(() => { })
+    const log = jest.spyOn(console, 'log').mockImplementation(() => { })
+    try {
+      await expect(run(['definitely-not-a-command'], { silent: true })).resolves.toBe(1)
+    } finally {
+      err.mockRestore()
+      log.mockRestore()
+    }
+  })
+
+  test('run(["list"]) succeeds', async () => {
+    const { run } = await import('../../packages/cli/src/index.js')
+    const log = jest.spyOn(console, 'log').mockImplementation(() => { })
+    try {
+      await expect(run(['list'], { silent: true })).resolves.toBe(0)
+    } finally {
+      log.mockRestore()
+    }
+  })
+})
+
+describe('parseArgs splits on the first = only', () => {
+  test('a connection URL survives intact', async () => {
+    const { parseArgs } = await import('../../packages/cli/src/utils.js')
+    const { flags } = parseArgs(['migrate', '--url=postgres://u:p@h/db?sslmode=require'])
+    expect(flags.url).toBe('postgres://u:p@h/db?sslmode=require')
+  })
+})

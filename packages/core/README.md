@@ -13,6 +13,7 @@ npm install @eloquentjs/core
 | Export | Description |
 |---|---|
 | `Model` | Base model class with full Eloquent API |
+| `DB` | `DB.transaction()`, `DB.table()`, `DB.raw()` — the non-model entry points |
 | `QueryBuilder` | Fluent chainable query builder |
 | `Collection` | Array wrapper with map/filter/pluck/groupBy and more |
 | `CastRegistry` | Type casting system (built-in + custom) |
@@ -32,7 +33,7 @@ npm install @eloquentjs/core
 ## Model
 
 ```js
-import { Model } from '@eloquentjs/core'
+import { Model, Attribute } from '@eloquentjs/core'
 
 class User extends Model {
   // ── Configuration ────────────────────────────────────────────────────────
@@ -43,6 +44,9 @@ class User extends Model {
   static appends     = ['full_name']      // virtual attributes included in toJSON()
   static timestamps  = true              // default true; adds created_at/updated_at
   static softDeletes = false             // set true to enable soft deletes
+  static attributes  = { role: 'member' } // defaults for new instances
+  static withRelations = ['profile']      // always eager-loaded (Laravel's $with)
+  static touches     = ['post']           // bump the parent's updated_at on save
 
   static casts = {
     is_admin:   'boolean',
@@ -69,6 +73,18 @@ class User extends Model {
     return bcrypt.hashSync(v, 10)
   }
 
+  // Laravel 9-style accessor/mutator pair, declared as a getter — a method
+  // named `fullName()` would shadow the attribute on every read.
+  get fullName() {
+    return Attribute.make({
+      get: (_, attrs) => `${attrs.first_name} ${attrs.last_name}`,
+      set: value => {
+        const [first_name, last_name] = value.split(' ')
+        return { first_name, last_name }   // writes both columns at once
+      },
+    })
+  }
+
   // ── Scopes ───────────────────────────────────────────────────────────────
   static scopeActive(qb)         { return qb.where('active', true) }
   static scopeOlderThan(qb, age) { return qb.where('age', '>', age) }
@@ -79,14 +95,44 @@ class User extends Model {
   }
 
   // ── Lifecycle Hooks ──────────────────────────────────────────────────────
-  static async creating(user) { user.uuid = crypto.randomUUID() }
-  static async created(user)  { await sendWelcomeEmail(user) }
-  static async updating(user) { }
-  static async updated(user)  { }
-  static async deleting(user) { await user.posts().delete() }
-  static async deleted(user)  { }
+  // Returning false from a "-ing" hook cancels the operation.
+  static async retrieved(user) { }
+  static async saving(user)    { }   // both insert and update
+  static async creating(user)  { user.uuid = crypto.randomUUID() }
+  static async created(user)   { await sendWelcomeEmail(user) }
+  static async updating(user)  { if (user.locked) return false }
+  static async updated(user)   { }
+  static async saved(user)     { }
+  static async deleting(user)  { await user.posts().delete() }
+  static async deleted(user)   { }
+  static async restoring(user) { }
+  static async restored(user)  { }
 }
 ```
+
+Apply a local scope:
+
+```js
+await User.scope('active').get()
+await User.scope('olderThan', 30).get()
+
+// Or wrap the class so scopes become methods
+import { withScopes } from '@eloquentjs/core'
+const ScopedUser = withScopes(User)
+await ScopedUser.active().get()
+```
+
+Observers and one-off hooks register against the class **reference**, so two
+`User` classes from different modules don't collide and minification can't break
+them:
+
+```js
+User.observe(new UserObserver())        // any of the events above
+const off = User.on('created', fn)      // returns an unregister function
+```
+
+The string event bus (`EventEmitter.on('User:created', fn)`) fires from the same
+dispatcher, so a listener registered either way runs exactly once per event.
 
 ---
 
@@ -167,20 +213,54 @@ await User.doesntExist()
 const page = await User.paginate(1, 20)
 // { data: User[], meta: { total, per_page, current_page, last_page, has_more } }
 
+// cursorPaginate: keyset pagination, stable while rows are inserted/deleted
+// elsewhere in the table — orders by primaryKey unless orderBy() sets another column
+const first = await User.cursorPaginate(20)
+// { data: User[], meta: { per_page, next_cursor, has_more } }
+const next = await User.query().cursorPaginate(20, first.meta.next_cursor)
+
+// UNION — combines two queries; this builder's ORDER BY/LIMIT apply to the
+// combined result. Not supported on MongoDB (no find() equivalent).
+await User.select('id', 'name').where('role', 'admin')
+  .union(User.select('id', 'name').where('role', 'editor'))
+  .orderBy('name')
+  .get()
+
 // EAGER LOADING
 await User.with('posts', 'profile').get()
 await User.with('posts.comments.author').get()
 await User.with({ posts: qb => qb.where('published', true) }).get()
 
-// CHUNK (memory-efficient iteration)
+// CHUNK / STREAM (memory-efficient iteration)
 await User.where('active', true).chunk(100, async (batch) => {
   await Promise.all(batch.map(u => processUser(u)))
 })
+// chunkById pages by primary key, so it is safe when the callback modifies rows
+await User.query().chunkById(100, async batch => { /* ... */ })
+for await (const user of User.query().lazy()) { /* one at a time */ }
+
+// CONDITIONAL
+await User.when(req.query.q, (qb, q) => qb.whereLike('name', `%${q}%`)).get()
+await User.query().unless(includeDrafts, qb => qb.where('published', true)).get()
+
+// REUSE — the builder is mutable, so clone() before branching
+const base = User.where('active', true)
+const [count, page] = await Promise.all([base.clone().count(), base.clone().paginate(1, 20)])
+
+// LOCKING
+await User.query().where('id', 1).lockForUpdate().first()
 
 // RAW
 await User.whereRaw('age > ?', [18]).get()
 await User.selectRaw('count(*) as total').first()
+
+// DEBUG
+await User.where('active', true).dump()   // logs SQL + params, keeps going
 ```
+
+Only whitelisted comparison operators reach the driver — the operator cannot be
+a bound parameter, so `where(col, req.query.op, v)` would otherwise be an
+injection point. Anything outside the list throws; use `whereRaw()` for the rest.
 
 ---
 
@@ -208,17 +288,60 @@ await user.restore()
 await User.withTrashed().get()
 await User.onlyTrashed().get()
 
+// Prunable — bulk-delete rows matching a query, in chunks
+class Post extends Model {
+  static prunable() { return this.where('archived_at', '<', thirtyDaysAgo()) }
+  static async pruning(post) { /* runs once per row, before delete */ }
+}
+await Post.prune()   // returns the number of rows deleted
+
 // Increment / Decrement
 await User.where('id', 1).increment('login_count')
 await User.where('id', 1).decrement('credits', 10)
 await User.where('id', 1).increment('score', 5, { last_activity: new Date() })
 
-// Dirty checking
+// Bulk insert-or-update
+await User.upsert(rows, 'email')                    // update all non-key columns
+await User.upsert(rows, 'email', ['name'])          // update only these
+await User.updateOrInsert({ email }, { name })
+
+// Dirty checking — pending changes
 user.isDirty()         // true if any attribute changed
 user.isDirty('name')   // true if 'name' changed
-user.getDirty()        // { name: 'new value' }
+user.getDirty()        // ['name']
 user.getOriginal()     // original values from DB
-user.wasChanged('name')
+
+// …and what the LAST save() actually wrote
+await user.save()
+user.wasChanged()        // did the save write anything?
+user.wasChanged('name')  // did it write this column?
+user.getChanges()        // { name: { from: 'old', to: 'new' } }
+
+// save() is a no-op when nothing is dirty — it does not touch updated_at
+// just to have something to write.
+await user.saveQuietly()            // save without touching timestamps
+await User.withoutTimestamps(fn)    // for a whole block
+await user.touch()                  // only bump updated_at
+await user.push()                   // save this model and every loaded relation
+const copy = user.replicate()       // unsaved copy, no id or timestamps
+user.is(other)                      // same class and same primary key
+```
+
+### Mass assignment
+
+`guarded` defaults to `['*']`, matching Laravel: **nothing is fillable until you
+declare `fillable`.** With `strictFill = true` a blocked key throws
+`MassAssignmentException` instead of being silently dropped.
+
+```js
+class User extends Model {
+  static fillable = ['name', 'email']   // only these come from user input
+  static strictFill = true              // fail loudly in development
+}
+
+User.create({ name: 'a', is_admin: true })   // is_admin is refused
+user.forceFill({ is_admin: true })           // explicit bypass
+await User.unguarded(() => User.create(trustedRow))
 ```
 
 ---
@@ -245,15 +368,29 @@ class User extends Model {
   roles() { return this.belongsToMany(Role, 'user_roles') }
 }
 await user.roles().attach(roleId, { assigned_at: new Date() })
-await user.roles().detach(roleId)
-await user.roles().sync([1, 2, 3])
+await user.roles().detach(roleId)            // or detach([1, 2])
+await user.roles().sync([1, 2, 3])           // or sync({ 1: { role: 'owner' } })
+await user.roles().syncWithoutDetaching([4])
 await user.roles().toggle(4)
-const roles = await user.roles()
-roles[0]._pivot.assigned_at  // access pivot data
 
-// Has-many-through
+const roles = await user.roles().withPivot('assigned_at').get()
+roles[0].pivot.assigned_at        // pivot data lives on a relation accessor
+user.roles().as('membership')     // rename it: roles[0].membership
+user.roles().withTimestamps()     // maintain created_at/updated_at on the pivot
+user.roles().wherePivot('assigned_at', '>', someDate)
+
+// Has-many-through / has-one-through
 class Country extends Model {
-  posts() { return this.hasManyThrough(Post, User, 'country_id', 'user_id') }
+  posts()  { return this.hasManyThrough(Post, User, 'country_id', 'user_id') }
+  latest() { return this.hasOneThrough(Post, User, 'country_id', 'user_id') }
+}
+
+// hasOne "of many" — the single latest/oldest related row, not all of them
+class User extends Model {
+  latestOrder() { return this.hasOne(Order).latestOfMany() }
+  firstOrder()  { return this.hasOne(Order).oldestOfMany('created_at') }
+  // or, for a non-timestamp column: hasOneOfMany(Order, 'total', 'MAX')
+  biggestOrder() { return this.hasOneOfMany(Order, 'total', 'MAX') }
 }
 
 // Polymorphic
@@ -262,11 +399,81 @@ class Image extends Model {
 }
 class User extends Model {
   images() { return this.morphMany(Image, 'imageable') }
+  tags()   { return this.morphToMany(Tag, 'taggable') }
 }
+
+// Register a morph alias so a class rename doesn't orphan existing rows.
+// Without this, `*_type` stores the raw class name.
+import { ModelRegistry } from '@eloquentjs/core'
+ModelRegistry.morphMap({ user: User, post: Post })
 
 // Relation writes
 await user.posts().create({ title: 'Hello' })
 await user.posts().saveMany([post1, post2])
+await user.posts().firstOrCreate({ slug: 'hello' }, { title: 'Hello' })
+await user.posts().updateOrCreate({ slug: 'hello' }, { title: 'Hi' })
+
+// A to-one relation can return a default instead of null
+const profile = await user.profile().withDefault({ bio: 'None yet' })
+```
+
+### A relation is a query builder
+
+Every builder method is available on the relation and constrains the database
+query, not the result in memory:
+
+```js
+await user.posts().where('published', true).latest().limit(5).get()
+await user.posts().where('published', true).count()
+await user.posts().paginate(1, 20)
+await user.posts().pluck('title')
+for await (const post of user.posts().lazy()) { /* streamed */ }
+
+user.posts().getQuery()    // the underlying QueryBuilder, if you need it
+```
+
+### Relationship queries
+
+```js
+await User.whereHas('posts').get()
+await User.whereHas('posts', qb => qb.where('published', true)).get()
+await User.whereDoesntHave('posts').get()
+
+const users = await User.withCount('posts').get()
+users[0].posts_count       // one aggregate query for the whole batch
+
+await User.withSum('orders', 'total').get()   // orders_sum_total
+await User.withExists('posts').get()          // posts_exists
+```
+
+---
+
+## Transactions
+
+```js
+import { DB } from '@eloquentjs/core'
+
+// Every model write inside — including in anything the callback awaits — runs
+// on the transaction's connection. A throw rolls all of it back.
+await DB.transaction(async () => {
+  const user = await User.create({ name: 'Alice' })
+  await user.profile().create({ bio: 'Hello' })
+})
+
+await DB.transaction(callback, 'primary')   // a named connection
+DB.inTransaction()                          // true inside the callback
+
+// Nested calls become savepoints where the driver supports them
+await DB.transaction(async () => {
+  await Account.create({ name: 'outer' })
+  try {
+    await DB.transaction(async () => { throw new Error('inner') })
+  } catch { /* 'outer' survives */ }
+})
+
+// Query a bare table, no model class needed
+await DB.table('users').where('email', email).count()
+await DB.raw('SELECT 1')
 ```
 
 ---
@@ -276,27 +483,48 @@ await user.posts().saveMany([post1, post2])
 ```js
 const users = await User.all()   // returns Collection
 
-users.first()
+users.first()                    // or first(fn)
 users.last()
-users.pluck('email')             // ['a@b.com', ...]
-users.groupBy('country')         // { US: [...], CA: [...] }
-users.keyBy('id')                // { 1: user, 2: user }
+users.sole()                     // exactly one, or throw
+users.pluck('email')             // Collection ['a@b.com', ...]
+users.pluck('email', 'id')       // Map { 1 => 'a@b.com' }
+users.groupBy('country')         // Map { 'US' => Collection, ... }
+users.keyBy('id')                // Map { 1 => user, ... }
+users.modelKeys()                // Collection of primary keys
 users.where('is_admin', true)
+users.whereIn('role', ['admin', 'editor'])
+users.contains('email', 'a@b.com')
+users.partition(u => u.is_admin) // [admins, others]
 users.sortBy('name')
 users.sortBy('age', 'desc')
 users.chunk(10)                  // Collection of Collections
 users.sum('balance')
 users.avg('score')
+users.median('score')
+users.min('age')                 // null when empty
+users.implode('name', ', ')
 users.unique('email')
+users.random(3)
+users.shuffle()
 users.only('id', 'name', 'email')
 users.except('password')
 users.mapInto(UserDTO)
-users.each(user => console.log(user.name))
+users.each(user => ...)          // return false to stop
 users.tap(col => console.log(col.length))
 users.when(condition, col => col.where('active', true))
 users.toArray()
 users.toJSON()
+
+// Lazy eager loading, after the fact
+await users.load('posts')
+await users.loadMissing('profile')
+await user.load('posts.comments')
 ```
+
+`groupBy`, `keyBy` and `pluck(v, k)` return `Map`s, not plain objects: object
+keys coerce to strings, and a key of `__proto__` mis-keys or throws. `where()`,
+`whereIn()`, `sum()`, `min()` and `max()` all read through `getAttribute()`, so
+casts and accessors apply consistently.
 
 ---
 
@@ -305,15 +533,24 @@ users.toJSON()
 ```js
 // Built-in cast types
 static casts = {
-  is_admin:   'boolean',    // true/false
-  score:      'integer',    // parseInt
-  price:      'decimal:2',  // toFixed(2) as number
+  is_admin:   'boolean',           // true/false
+  score:      'integer',           // parseInt
+  price:      'decimal:2',         // number in memory, fixed string in JSON
   rating:     'float',
-  born_at:    'date',       // Date object
-  created_at: 'datetime',   // Date object
-  settings:   'json',       // JSON.parse/stringify
-  tags:       'array',      // JSON array
+  born_at:    'date',              // Date object
+  created_at: 'datetime',          // Date object
+  settings:   'json',              // JSON.parse/stringify
+  tags:       'array',             // JSON array
+  published_at: 'immutable_date',  // frozen Date copy on read
+  password:   'hashed',            // scrypt on write; never serialised
+  status:     AsEnum(Status),      // only values the enum contains
+  tag_list:   AsCollection,        // JSON array read back as a Collection
+  options:    AsArrayObject,       // JSON object read back as a plain object; null reads as {}
 }
+
+// `hashed` columns are verified, not compared
+import { verifyHashed } from '@eloquentjs/core'
+verifyHashed(submitted, user.getRawAttribute('password'))
 
 // Custom cast class
 class MoneyAmountCast {
@@ -331,19 +568,81 @@ CastRegistry.register('money', MoneyAmountCast)
 // then use: static casts = { total: 'money' }
 ```
 
+One instance per cast class is shared, so `this` inside a cast is stable and a
+`serialize()` that uses it works. Cast instances are not created per attribute
+access.
+
+---
+
+## Migrations
+
+```js
+import { Schema, Migration, Expr } from '@eloquentjs/core'
+
+export default class CreateUsersTable extends Migration {
+  async up() {
+    await Schema.create('users', t => {
+      t.id()                                  // bigIncrements primary key
+      t.uuid('public_id')                     // uuid PK, defaults to Expr.uuid
+      t.string('email').unique()              // a named, droppable unique index
+      t.string('name').index()                // a real index — used to be a no-op
+      t.unsignedInteger('login_count').default(0)
+      t.timestamp('verified_at').nullable()
+      t.timestamp('seen_at').useCurrent()     // Expr.now, rendered per driver
+      t.foreignId('role_id').cascadeOnDelete().constrained('roles')
+      t.timestamps()
+      t.softDeletes()
+    })
+  }
+
+  async down() {
+    await Schema.dropIfExists('users')
+  }
+}
+```
+
+Altering an existing table:
+
+```js
+await Schema.table('users', t => {
+  t.string('nickname').nullable()          // ADD COLUMN
+  t.string('name', 500).change()           // ALTER the column's type
+  t.index(['tenant_id', 'created_at'])     // applied on alter too, not just create
+  t.foreignId('team_id').constrained('teams')
+  t.dropColumn('legacy_flag')
+  t.renameColumn('bio', 'about')
+  t.dropUnique('users_email_unique')
+})
+```
+
+Notes that matter across drivers:
+
+- Core emits **portable default markers** (`Expr.uuid`, `Expr.now`,
+  `Expr.today`), never dialect SQL. Each driver renders them: Postgres uses
+  `gen_random_uuid()`, SQLite builds a v4 from `randomblob()`.
+- Constraint names come from core, so a migration written against one driver can
+  be rolled back against another: `users_email_unique`, `posts_user_id_foreign`.
+- `Schema.drop()` and `Model.truncate()` **never cascade implicitly**. Pass
+  `{ cascade: true }` when you mean it.
+- SQLite rebuilds the table for operations it cannot do in place; that is handled
+  for you.
+
 ---
 
 ## Validation
 
-The core `Validator` handles sync validation with 25+ rules — no dependencies required.
+The core `Validator` handles 30+ rules with no dependencies. Rules may be an
+array or Laravel's pipe string; `@eloquentjs/validator` subclasses this one, so
+each rule name has exactly one implementation.
 
 ```js
 import { Validator } from '@eloquentjs/core'
 
 const v = Validator.make(data, {
   name:     ['required', 'string', 'min:2', 'max:100'],
-  email:    ['required', 'email'],
-  age:      ['required', 'integer', 'min:18'],
+  email:    'required|email|unique:users,email',   // pipe syntax works too
+  age:      ['required', 'integer', 'min:18'],     // numeric, not string length
+  bio:      ['nullable', 'string'],                // empty → skip the rest
   password: ['required', 'min:8', 'confirmed'],
   role:     ['required', 'in:admin,editor,viewer'],
 }, {
@@ -359,7 +658,20 @@ if (v.fails()) {
 const data = v.validated()  // throws ValidationException if invalid; returns declared fields only
 ```
 
-For **async rules** (`unique`, `exists`), **fluent schema API** (`v.string().email().unique(...)`), **nested fields**, **custom Rule classes**, and **Express/Fastify adapters**, use [`@eloquentjs/validator`](../validator/README.md):
+`unique` and `exists` query the database, so they only run on the async path:
+
+```js
+if (await v.failsAsync()) return res.status(422).json({ errors: v.errors })
+const data = await v.validatedAsync()
+```
+
+A sync `validate()` **skips** them rather than reporting them as passed, and a
+database error surfaces rather than being swallowed into "valid". An unknown rule
+name throws, so a typo can't silently pass.
+
+For the **fluent schema API** (`v.string().email().unique(...)`), **wildcard
+paths** (`items.*.price`), **custom Rule classes**, `after()` hooks and
+**Express/Fastify adapters**, use [`@eloquentjs/validator`](../validator/README.md):
 
 ```js
 import { v, Rule } from '@eloquentjs/validator'
@@ -384,12 +696,16 @@ import { Pipeline } from '@eloquentjs/core'
 const result = await Pipeline
   .send(userData)
   .through(
-    ValidateInput,           // class with handle(data, next) method
+    ValidateInput,           // a class (or instance) with a handle(data) method
     SanitizeEmail,
     HashPassword,
-    async (data, next) => next({ ...data, slug: slugify(data.name) }),
+    async (data) => ({ ...data, slug: slugify(data.name) }),   // or a function
   )
   .thenReturn()
+
+// Or hand the result to a final destination (Laravel spells this `->then(fn)`;
+// `then` here is the promise protocol, so the pipeline can be awaited directly)
+await Pipeline.send(userData).through(...steps).thenTo(data => User.create(data))
 ```
 
 ---
@@ -401,7 +717,7 @@ import { Factory, Seeder } from '@eloquentjs/core'
 import { faker } from '@faker-js/faker'
 
 class UserFactory extends Factory {
-  model = User
+  static model = User
   definition() {
     return {
       name:     faker.person.fullName(),
@@ -416,7 +732,30 @@ class UserFactory extends Factory {
 
 const user  = await UserFactory.new().create()
 const admin = await UserFactory.new().admin().create()
-const users = await UserFactory.new().count(50).create()
+const users = await UserFactory.new().count(50).create()   // a Collection
+
+// Cycle values across rows
+await UserFactory.new().count(4).sequence({ role: 'admin' }, { role: 'editor' }).create()
+
+// Relations
+await UserFactory.new().has(PostFactory.new().count(3), 'posts').create()
+await PostFactory.new().count(5).for(user, 'author').create()
+
+// Just the attributes, or a model without saving, or no events
+const attrs = UserFactory.new().raw()
+const made  = await UserFactory.new().make()
+await UserFactory.new().createQuietly()
+```
+
+Factories `forceFill`: seed data is trusted, and since `guarded` defaults to
+`['*']`, going through mass assignment would drop every attribute on a model
+that hasn't declared `fillable`.
+
+`definition()` must import its own faker — no package declares
+`@faker-js/faker` as a dependency, so add it to your project:
+
+```bash
+npm install --save-dev @faker-js/faker
 
 // Seeder
 class DatabaseSeeder extends Seeder {

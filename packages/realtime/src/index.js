@@ -12,26 +12,16 @@
  *   rt.broadcastFrom(User)     // auto-broadcast User:created/updated/deleted
  *   rt.broadcastFrom(Post)
  *
- * Client (browser) usage with built-in EloquentJS client:
- *   import { RealtimeClient } from '@eloquentjs/realtime/client'
- *   const client = new RealtimeClient('ws://localhost:6001')
- *
- *   client.subscribe('users', ['created', 'updated'])
- *     .on('created', user => console.log('New user:', user))
- *     .on('updated', user => console.log('User updated:', user))
- *
- *   // Private channels (auth required)
- *   client.private('users.1').on('updated', ...)
- *
- *   // Presence channels (see who's online)
- *   client.presence('chat.room.1').on('join', member => ...)
+ * Client usage — see @eloquentjs/realtime/client, which is browser-safe and
+ * imports nothing from Node.
  */
 
 import { WebSocketServer, WebSocket } from 'ws'
-import { EventEmitter } from '@eloquentjs/core'
-import { toSnakeCase } from '@eloquentjs/core'
+import { EventEmitter, toSnakePlural } from '@eloquentjs/core'
 import { createServer } from 'http'
 import crypto from 'crypto'
+
+export { RealtimeClient } from './client.js'
 
 /**
  * @typedef {Object} RealtimeServerOptions
@@ -42,6 +32,7 @@ import crypto from 'crypto'
  * @property {string} [appSecret] - required at runtime; throws if missing
  * @property {string} [authEndpoint]
  * @property {number} [pingInterval]
+ * @property {number} [maxChannelsPerSocket] cap on channels one socket may join
  */
 
 /** @param {RealtimeServerOptions} [options] */
@@ -66,6 +57,7 @@ class RealtimeServer {
         appSecret,
         authEndpoint = '/broadcasting/auth',
         pingInterval = 30000,
+        maxChannelsPerSocket = 100,
     } = {}) {
         if (!appKey || !appSecret) {
             throw new Error(
@@ -79,11 +71,17 @@ class RealtimeServer {
         this.appSecret = appSecret
         this.authEndpoint = authEndpoint
         this.pingInterval = pingInterval
+        // A socket subscribing to unlimited arbitrary channel names is an
+        // unbounded memory sink on the server.
+        this.maxChannelsPerSocket = maxChannelsPerSocket
 
         // channels: Map<channelName, Set<WebSocket>>
         this._channels = new Map()
         // presence data: Map<channelName, Map<socketId, memberInfo>>
         this._presence = new Map()
+        // EventEmitter unsubscribe functions registered by broadcastFrom()
+        this._unsubscribers = []
+        this._ownsHttpServer = !server
 
         this._httpServer = server || createServer()
         this._wss = new WebSocketServer({ server: this._httpServer })
@@ -99,21 +97,33 @@ class RealtimeServer {
     }
 
     // ─── Auto-broadcast model events ──────────────────────────────────────────
+    /**
+     * @param {typeof import('@eloquentjs/core').Model} ModelClass
+     * @param {{events?: string[], channel?: string|null, transform?: Function|null, private?: boolean}} [opts]
+     *   `private: true` prefixes the channel with `private-`, so the payload
+     *   only reaches sockets that presented a valid signature. Model rows are
+     *   otherwise published on an unauthenticated public channel.
+     */
     broadcastFrom(ModelClass, {
         events = ['created', 'updated', 'deleted'],
         channel = null,
         transform = null,
+        private: isPrivate = false,
     } = {}) {
-        const channelName = channel || toSnakeCase(ModelClass.name) + 's'
+        // Core's pluraliser, so the channel name matches the REST route and the
+        // table — `toSnakeCase(name) + 's'` gave `categorys`.
+        const base = channel || toSnakePlural(ModelClass.name)
+        const channelName = isPrivate && !base.startsWith('private-') ? `private-${base}` : base
 
         for (const event of events) {
-            EventEmitter.on(`${ModelClass.name}:${event}`, async (model) => {
+            const off = EventEmitter.on(`${ModelClass.name}:${event}`, async (model) => {
                 const payload = transform ? transform(model, event) : model.toJSON()
                 this.broadcast(channelName, event, payload)
                 // Also broadcast to per-record channel: users.{id}
                 const id = model[ModelClass.primaryKey]
                 if (id) this.broadcast(`${channelName}.${id}`, event, payload)
             })
+            this._unsubscribers.push(off)
         }
 
         return this
@@ -188,6 +198,11 @@ class RealtimeServer {
             }
         }
 
+        if (!ws.subscribedChannels.has(channel)
+            && ws.subscribedChannels.size >= this.maxChannelsPerSocket) {
+            return this._error(ws, `Channel limit reached (${this.maxChannelsPerSocket})`, 4100)
+        }
+
         ; (this._channels.get(channel) ?? this._channels.set(channel, new Set()).get(channel)).add(ws)
         ws.subscribedChannels.add(channel)
 
@@ -225,12 +240,38 @@ class RealtimeServer {
         }
     }
 
+    /**
+     * Relay a client-to-client event.
+     *
+     * Three checks that were missing, each of which let any connected socket
+     * inject arbitrary events into any channel:
+     *  1. The sender must be subscribed to the channel.
+     *  2. Client events are only allowed on private/presence channels — a
+     *     public channel has no authenticated senders.
+     *  3. The event name must be `client-` prefixed, so a client can never
+     *     forge a server event like `created` or a `pusher_internal:` frame.
+     */
     _broadcastClientEvent(senderWs, msg) {
-        const subscribers = this._channels.get(msg.channel) ?? new Set()
-        for (const ws of subscribers) {
-            if (ws !== senderWs && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify(msg))
-            }
+        const channel = msg.channel
+        const name = msg.name ?? msg.event
+
+        if (!senderWs.subscribedChannels.has(channel)) return this._error(senderWs, 'Not subscribed to channel')
+        if (!channel.startsWith('private-') && !channel.startsWith('presence-')) {
+            return this._error(senderWs, 'Client events are only allowed on private and presence channels')
+        }
+        if (typeof name !== 'string' || !name.startsWith('client-')) {
+            return this._error(senderWs, 'Client event names must be prefixed with "client-"')
+        }
+
+        const frame = JSON.stringify({ channel, event: name, data: msg.data })
+        for (const ws of this._channels.get(channel) ?? []) {
+            if (ws !== senderWs && ws.readyState === WebSocket.OPEN) ws.send(frame)
+        }
+    }
+
+    _error(ws, message, code = 4009) {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ event: 'pusher:error', data: { message, code } }))
         }
     }
 
@@ -252,12 +293,25 @@ class RealtimeServer {
     }
 
     // ─── Auth handler (attach to Express/Fastify) ─────────────────────────────
+    /**
+     * @param {(req: any, socketId: string, channel: string) => any} authCallback
+     *   Return false (or null/undefined) to deny, or throw. Only a *positive*
+     *   result authorises: returning false used to be treated as "allowed",
+     *   because only a throw was checked.
+     */
     authHandler(authCallback) {
         return async (req, res) => {
-            const { socket_id, channel_name } = req.body
+            const { socket_id, channel_name } = req.body ?? {}
+            if (!socket_id || !channel_name) {
+                return res.status(422).json({ error: 'socket_id and channel_name are required' })
+            }
             try {
-                const channelData = await authCallback(req, socket_id, channel_name)
+                const result = await authCallback(req, socket_id, channel_name)
+                if (result === false || result === null || result === undefined) {
+                    return res.status(403).json({ error: 'Forbidden' })
+                }
                 const auth = this._signChannel(socket_id, channel_name)
+                const channelData = result === true ? null : result
                 res.json({ auth, ...(channelData ? { channel_data: JSON.stringify(channelData) } : {}) })
             } catch (err) {
                 res.status(403).json({ error: 'Forbidden' })
@@ -265,98 +319,24 @@ class RealtimeServer {
         }
     }
 
-    close() {
+    /** Release everything this server owns: timer, listeners, sockets, HTTP server. */
+    async close() {
         clearInterval(this._pingTimer)
         this._pingTimer = null
-        this._wss.close()
-    }
-}
 
-// ─── Lightweight browser/Node client ──────────────────────────────────────
-export class RealtimeClient {
-    /**
-     * @param {string} url
-     * @param {{appKey?: string}} [options]
-     */
-    constructor(url, { appKey } = {}) {
-        this._url = url
-        this._handlers = new Map()   // channel:event -> [fn]
-        this._subscriptions = new Map()
-        this._reconnectDelay = 1000
-        this._reconnectTimer = null
-        this._destroyed = false      // true after disconnect() — prevents reconnect loop
-        this._connect()
-    }
+        // Without this, broadcastFrom() listeners keep firing — and keep the
+        // server object alive — after close().
+        for (const off of this._unsubscribers) off()
+        this._unsubscribers = []
 
-    _connect() {
-        if (this._destroyed) return
-        this._ws = new WebSocket(this._url)
+        for (const ws of this._wss.clients) ws.terminate()
+        this._channels.clear()
+        this._presence.clear()
 
-        this._ws.on('open', () => {
-            this._reconnectDelay = 1000
-            // Re-subscribe to all channels after reconnect
-            for (const [channel] of this._subscriptions) {
-                this._sendSubscribe(channel)
-            }
-        })
-
-        this._ws.on('message', (raw) => {
-            try {
-                const msg = JSON.parse(raw.toString())
-                const handlers = this._handlers.get(`${msg.channel}:${msg.event}`) ?? []
-                for (const fn of handlers) fn(typeof msg.data === 'string' ? JSON.parse(msg.data) : msg.data)
-            } catch { }
-        })
-
-        this._ws.on('close', () => {
-            if (this._destroyed) return
-            this._reconnectTimer = setTimeout(() => {
-                this._reconnectDelay = Math.min(this._reconnectDelay * 2, 30_000)
-                this._connect()
-            }, this._reconnectDelay)
-        })
-    }
-
-    subscribe(channel) {
-        this._subscriptions.set(channel, true)
-        this._sendSubscribe(channel)
-        const sub = {
-            on: (event, fn) => {
-                const key = `${channel}:${event}`
-                    ; (this._handlers.get(key) ?? this._handlers.set(key, []).get(key)).push(fn)
-                return sub
-            },
-            off: (event, fn) => {
-                const key = `${channel}:${event}`
-                const list = this._handlers.get(key) ?? []
-                this._handlers.set(key, list.filter(f => f !== fn))
-                return sub
-            },
-            unsubscribe: () => {
-                this._subscriptions.delete(channel)
-                if (this._ws.readyState === WebSocket.OPEN) {
-                    this._ws.send(JSON.stringify({ event: 'pusher:unsubscribe', data: { channel } }))
-                }
-            }
+        await new Promise(resolve => this._wss.close(resolve))
+        // Only close the HTTP server we created; an injected one is the caller's.
+        if (this._ownsHttpServer) {
+            await new Promise(resolve => this._httpServer.close(resolve))
         }
-        return sub
-    }
-
-    private(channel) { return this.subscribe(`private-${channel}`) }
-    presence(channel) { return this.subscribe(`presence-${channel}`) }
-
-    _sendSubscribe(channel) {
-        if (this._ws.readyState === WebSocket.OPEN) {
-            this._ws.send(JSON.stringify({ event: 'pusher:subscribe', data: { channel } }))
-        }
-    }
-
-    disconnect() {
-        this._destroyed = true
-        clearTimeout(this._reconnectTimer)
-        this._reconnectTimer = null
-        this._ws.close()
-        this._handlers.clear()
-        this._subscriptions.clear()
     }
 }

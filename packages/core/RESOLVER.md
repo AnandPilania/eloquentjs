@@ -105,7 +105,29 @@ Append `rawWheres` last, `AND`-ed.
 
 ---
 
-## Required methods
+## What is required, and what is optional
+
+Three places describe this contract, and they are kept in step:
+
+| Where | Role |
+|---|---|
+| this file | prose |
+| `ModelResolver` typedef in [`src/Model.js`](src/Model.js) | types |
+| `REQUIRED_METHODS` / `OPTIONAL_METHODS` in [`src/testing/conformance.js`](src/testing/conformance.js) | the machine check |
+
+**Required** — core calls these without checking first, so a driver that omits
+one is broken: `select`, `insert`, `update`, `delete`, `truncate`.
+
+**Optional** — core checks and throws an error naming your driver when the
+method is missing, so a store that genuinely cannot support one may omit it.
+Everything else on this page is optional in that sense. All three in-tree
+drivers implement all of them (except `upsert`, which core emulates).
+
+The tiers used to disagree: `aggregate` was documented optional and called
+unguarded, so `count()` hard-failed on any resolver that took the wording
+literally.
+
+## Method reference
 
 All are `async`. `table` is always a plain string.
 
@@ -113,20 +135,28 @@ All are `async`. `table` is always a plain string.
 
 | Method | Returns |
 |---|---|
-| `select(table, ctx)` | Array of plain row objects. |
-| `aggregate(table, fn, column, ctx)` | A single number. `fn` ∈ `count`, `sum`, `avg`, `min`, `max`. `count` with `column = '*'` counts rows. |
+| `select(table, ctx)` | **Required.** Array of plain row objects. |
+| `aggregate(table, fn, column, ctx)` | A single number. `fn` ∈ `count`, `sum`, `avg`, `min`, `max`. `count` with `column = '*'` counts rows. When `ctx.groupBys` is non-empty, aggregate over the **groups** — reading `rows[0]` reports the first group and makes `paginate()` totals wrong. |
 | `toSQL(table, ctx)` | `{ sql, params }` for debugging. Must not execute. Non-SQL stores return their own query description. |
 
 ### Writes
 
 | Method | Returns |
 |---|---|
-| `insert(table, data)` | The inserted row, including any generated primary key. Postgres uses `RETURNING *`; others read the row back. If the store returns an id under another name, expose it as `insertedId`. |
+| `insert(table, data)` | **Required.** The inserted row, including any generated primary key. Postgres and SQLite use `RETURNING *`. If the store returns an id under another name, expose it as `insertedId`. |
 | `insertMany(table, rows)` | Array of inserted rows. Columns are the **union** of all row keys; a row missing a key gets `NULL`. Must be one round trip. An empty `rows` returns `[]` without touching the database. |
-| `update(table, conditions, data, ctx = null)` | Number of affected rows. `conditions` is a plain `{key: value}` object for single-record saves; when `ctx` is given, use it instead for bulk updates. |
-| `delete(table, conditions, ctx = null)` | Number of affected rows. Same `conditions`/`ctx` split. |
+| `update(table, conditions, data, ctx = null)` | **Required.** Number of affected rows. `conditions` is a plain `{key: value}` object for single-record saves; when `ctx` is given, use it instead for bulk updates. |
+| `delete(table, conditions, ctx = null)` | **Required.** Number of affected rows. Same `conditions`/`ctx` split. |
 | `increment(table, column, amount, extra, ctx)` | Number of affected rows. `amount` may be negative (that is how `decrement` works). `extra` is additional columns to `SET` in the same statement. |
-| `truncate(table)` | Removes all rows. |
+| `truncate(table, { cascade, restartIdentity })` | **Required.** Removes all rows. Both options default to `false` — never cascade implicitly. |
+| `upsert(table, rows, uniqueBy, update)` | Optional. When absent, `QueryBuilder.upsert()` emulates it with an update-then-insert per row. |
+
+### Operators
+
+`ctx.wheres[].operator` and `j.operator` are interpolated into the statement —
+they cannot be bound. Pass them through core's `assertOperator()`, which
+validates against a fixed whitelist, before they reach your SQL. Anything else
+is an injection point the moment a caller can choose the operator.
 
 Bind every value as a parameter. Pass every identifier through your own
 quoting helper — core does not pre-quote, and `column` can be `table.column`.
@@ -174,29 +204,76 @@ A blueprint carries `{ columns, foreigns, indexes }`. Each column has `name`,
 
 #### Defaults need care
 
-`col._default` is either a literal or a **SQL expression**, and telling them
-apart is dialect work:
+`col._default` is either a literal or a **portable expression marker**, and
+rendering it is dialect work:
 
-- A quoted literal is almost always what you want: `DEFAULT 'active'`, not
-  `DEFAULT active` (an identifier reference, or a syntax error).
-- `Blueprint.uuid()` emits the Postgres expression `gen_random_uuid()`. Map
-  portable expressions to your dialect — SQLite has no uuid function and builds
-  one from `randomblob()`.
+- `{expr: 'uuid' | 'now' | 'today'}` is a marker emitted by `Blueprint`
+  (`Expr.uuid`, `.useCurrent()`, `t.uuid()`). Render it in your own dialect and
+  throw on markers you do not know. Core does not emit driver SQL — it used to
+  emit `gen_random_uuid()`, which SQLite then had to translate back out.
+- A quoted literal is almost always what you want for anything else:
+  `DEFAULT 'active'`, not `DEFAULT active` (an identifier reference, or a
+  syntax error).
 - SQLite additionally requires non-constant defaults to be **parenthesized**:
   `DEFAULT (unixepoch())`, never `DEFAULT unixepoch()`.
 
-Both SQL drivers have a local `formatDefault()`; copy the closest one.
+Both SQL drivers have a local `formatDefault()` and an expression map; copy the
+closest one.
+
+#### Blueprint also carries
+
+- `blueprint.changes` — columns redefined with `->change()`. `ALTER … TYPE` them
+  rather than adding them. Stores that cannot alter a column in place rebuild the
+  table (see the SQLite driver).
+- `blueprint.indexes` and `blueprint.foreigns` apply to `alterTable` too, not
+  only `createTable`. Ignoring them there means `Schema.table('users', t =>
+  t.index('email'))` silently does nothing.
+- Constraint names come from core's `indexName()` / `foreignKeyName()`, so a
+  migration written against one driver can be rolled back against another.
 
 ---
 
-## Optional methods
+## Transactions
 
-Absent is fine — core never calls these itself.
+`transaction(fn)` must make model writes inside `fn` participate. Check out a
+dedicated connection (or start a session), construct a **scoped resolver** bound
+to it, and publish that resolver for the duration:
+
+```js
+import { runInTransaction } from '@eloquentjs/core'
+
+async transaction(fn) {
+  const client = await this.pool.connect()
+  const scoped = new MyResolver(client, this.connectionName)
+  try {
+    await client.query('BEGIN')
+    // Every getResolver() below this — including the ones inside Model.save()
+    // — now returns `scoped`.
+    const result = await runInTransaction(this.connectionName, scoped, () => fn(scoped))
+    await client.query('COMMIT')
+    return result
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {})
+    throw err
+  } finally {
+    client.release()
+  }
+}
+```
+
+Without `runInTransaction`, `BEGIN`/`COMMIT` wraps zero statements: the callback's
+model writes run on a different pooled connection and are already durable when
+the rollback happens.
+
+Nested calls should become savepoints where the store supports them. Pass the
+scoped resolver to the callback so `tx.raw(...)` also joins the transaction.
+
+## Other optional methods
 
 | Method | Notes |
 |---|---|
-| `raw(sql, params)` | Escape hatch. `@eloquentjs/mongodb` omits it. |
-| `transaction(callback)` | Usually a module-level export from the driver, not a resolver method. Give the callback a client with the same interface, and roll back if it throws. |
+| `raw(sql, params)` | Escape hatch, and what `DB.raw()` calls. Non-SQL stores may take a command document instead. |
+| `supportsJoins` | A property, not a method. Set `false` when the store cannot JOIN; `belongsToMany` and `hasManyThrough` then throw a clear error rather than silently ignoring the join. |
 
 ---
 

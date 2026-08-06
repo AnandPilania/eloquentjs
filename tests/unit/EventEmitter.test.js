@@ -82,8 +82,16 @@ describe('EventEmitter', () => {
     expect(hits).toHaveLength(1)
   })
 
-  test('emit() on unregistered event does nothing', async () => {
-    await expect(EventEmitter.emit('nonexistent', 'x')).resolves.toBeUndefined()
+  test('emit() on unregistered event does nothing and reports "not cancelled"', async () => {
+    await expect(EventEmitter.emit('nonexistent', 'x')).resolves.toBe(true)
+  })
+
+  test('a listener returning false cancels', async () => {
+    EventEmitter.on('cancelme', () => false)
+    const after = []
+    EventEmitter.on('cancelme', () => { after.push(1) })
+    await expect(EventEmitter.emit('cancelme')).resolves.toBe(false)
+    expect(after).toHaveLength(0)
   })
 
   test('flush() removes all listeners for an event', async () => {
@@ -248,7 +256,19 @@ describe('HookRegistry', () => {
     expect(order).toEqual(['static', 'registered'])
   })
 
-  test('firing non-existent event does nothing', async () => {
-    await expect(HookRegistry.for(Widget).fire('nonexistent', null)).resolves.toBeUndefined()
+  test('firing an event with no listeners does nothing and reports "not cancelled"', async () => {
+    await expect(HookRegistry.for(Widget).fire('saved', null)).resolves.toBe(true)
+  })
+
+  test('register() rejects unknown event names instead of silently never firing', () => {
+    expect(() => HookRegistry.register(Widget, 'creatd', () => { })).toThrow(/Unknown model event/)
+  })
+
+  test('a "-ing" hook returning false cancels', async () => {
+    HookRegistry.register(Widget, 'creating', () => false)
+    const after = []
+    HookRegistry.register(Widget, 'creating', () => { after.push(1) })
+    await expect(HookRegistry.for(Widget).fire('creating', null)).resolves.toBe(false)
+    expect(after).toHaveLength(0)
   })
 })

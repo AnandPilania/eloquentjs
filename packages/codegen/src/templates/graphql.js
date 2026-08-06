@@ -7,6 +7,8 @@
  *   - @eloquentjs/cli      (eloquent generate:graphql — writes .graphql files)
  */
 
+import { toSnakePlural, toCamelCase } from '@eloquentjs/core'
+
 /**
  * Generate full GraphQL SDL for one model.
  * @param {import('../introspect.js').ModelSchema} schema
@@ -21,7 +23,9 @@ export function generateGraphqlSDL(schema, opts = {}) {
 
   const { name, fields, relations, softDeletes, graphql: gql } = schema
   const singular = lcFirst(name)
-  const plural   = singular + 's'
+  // Core's pluraliser, so the SDL, the runtime resolvers and the REST routes
+  // agree — `singular + 's'` produced `categorys`.
+  const plural   = toCamelCase(toSnakePlural(name))
 
   // ── Visible fields (respecting graphql.hidden) ───────────────────────────
   const visibleFields = fields.filter(f => !gql.hidden.has(f.name))
@@ -70,7 +74,6 @@ export function generateGraphqlSDL(schema, opts = {}) {
     paginated = `type ${name}Page {\n  data: [${name}!]!\n  meta: PaginationMeta!\n}`
   }
 
-  const listType   = pagination === 'relay' ? `${name}Connection` : `${name}Page`
   const listReturn = pagination === 'relay' ? `${name}Connection!` : `${name}Page!`
 
   // ── Query fields ──────────────────────────────────────────────────────────

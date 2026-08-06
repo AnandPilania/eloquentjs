@@ -73,8 +73,13 @@ apiRouter([
     // Columns available for ?search=
     searchable: ['name', 'email', 'bio'],
 
-    // Columns available for ?sort=
+    // Columns available for ?sort=. Opt-in, exactly like `filterable`:
+    // an empty list means sorting is disabled, not "sort by anything",
+    // which would let a client order by a hidden column.
     sortable: ['name', 'created_at', 'score'],
+
+    // Columns available for ?column=value. Opt-in; hidden columns are refused.
+    filterable: ['role', 'country'],
 
     // Custom filter function
     filters: async (qb, query) => {
@@ -89,9 +94,11 @@ apiRouter([
       return result
     },
 
-    // Authorization policy
+    // Authorization policy — consulted for EVERY action, including the
+    // soft-delete ones (`trashed` and `restore` used to skip it entirely).
     policy: async (req, model, action) => {
       // action: 'index' | 'show' | 'store' | 'update' | 'patch' | 'destroy'
+      //       | 'trashed' | 'restore'
       if (action === 'destroy') return req.user.is_admin
       return true   // allow all others
     },
@@ -149,13 +156,40 @@ const app = Fastify()
 await app.register(fastifyPlugin, {
   models:  [User, Post, Comment],
   prefix:  '/api',
-  // Per-model options
-  User:    { only: ['index', 'show'] },
+  // Shared options apply to every model
+  paginate: { maxPerPage: 50 },
+  // Per-model options, keyed by class name
+  User:    { only: ['index', 'show'], policy, sortable: ['created_at'] },
   Post:    { with: ['user', 'tags'] },
 })
 
 await app.listen({ port: 3000 })
 ```
+
+The Fastify path builds from the same route table as `apiRouter`, so it supports
+the same options — policy, filtering, search, sort, eager loads, soft-delete
+routes and nested resources — rather than a reduced subset. No JSON content-type
+parser is registered: Fastify ships one, and re-registering it throws
+`FST_ERR_CTP_ALREADY_PRESENT`.
+
+---
+
+## Security defaults
+
+- **Mass assignment.** `Model.guarded` defaults to `['*']`, so `store`/`update`
+  write nothing until the model declares `fillable`. `req.body` reaching
+  `create()` can no longer set `is_admin`.
+- **Filtering and sorting are opt-in.** `?column=value` needs `filterable`,
+  `?sort=` needs `sortable`, and `hidden` columns are refused in both.
+- **`?with=` is opt-in** too: only relations named in the resource's `with`
+  option can be requested.
+- **Pagination input is clamped.** A non-numeric `per_page` falls back to the
+  default, `maxPerPage` is enforced, and `?page=0` cannot produce a negative
+  `OFFSET`.
+- **Validation runs async**, so `unique` and `exists` rules actually query the
+  database.
+- **Middleware that answers the request** (`res.status(401).json(...)` and
+  return, without calling `next()`) ends the request instead of hanging it.
 
 ---
 

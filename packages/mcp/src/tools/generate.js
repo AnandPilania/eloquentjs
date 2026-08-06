@@ -177,7 +177,7 @@ export async function handleGenerateModel(args, ctx) {
     }
 
     if (args.write) {
-        for (const [type, { code, path }] of Object.entries(outputs)) {
+        for (const { code, path } of Object.values(outputs)) {
             ensureDir(resolve(path, '..'))
             writeFileSync(path, code, 'utf8')
         }

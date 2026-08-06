@@ -71,10 +71,10 @@ jobs:
 
       - run: npm ci
 
-      # `node --check` parses without executing and exits non-zero on a syntax
-      # error. Piping a module to stdin (the previous approach) *ran* it and
-      # swallowed the exit code, so this job could never fail.
-      - name: Check every source file parses
+      # ESLint for correctness rules (unused/dead code, fall-through, duplicate
+      # keys), then `node --check` per file as a parse backstop. `npm run lint`
+      # runs both; it used to be the parse check alone.
+      - name: Lint
         run: npm run lint
 
       - name: Check package.json files are valid JSON
@@ -98,8 +98,12 @@ jobs:
 
       - run: npm ci
 
-      # Emits declarations from JSDoc via tsc --allowJs --checkJs; fails the job
-      # if any package's JSDoc doesn't type-check. See tsconfig.base.json.
+      # Emits declarations from JSDoc via tsc --allowJs --checkJs. With
+      # noEmitOnError now true, a type error fails the job *and* stops the stale
+      # declarations from being written. See tsconfig.base.json.
+      # dist-types/ is gitignored and rebuilt here; each package's
+      # prepublishOnly rebuilds it again before publish, so a published
+      # package can never carry declarations older than its source.
       - name: Build declarations for all packages
         run: npm run build
 

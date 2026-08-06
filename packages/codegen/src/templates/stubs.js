@@ -37,10 +37,19 @@ export function generateModelStub(schema, opts = {}) {
     ? `['${hidden.join("', '")}']`
     : '[]'
 
-  // Relation stubs
+  // Relation stubs. Commented out when the related class isn't known: emitting
+  // `this.hasMany(/* Post */)` parses but throws the moment it is called.
+  const relationImports = [...new Set(
+    relations.map(r => r.related).filter(r => r && r !== 'Unknown')
+  )]
   const relationBlock = relations.length
-    ? relations.map(r => `  ${r.name}() { return this.${r.type}(/* ${r.related} */) }`).join('\n')
+    ? relations.map(r => (r.related && r.related !== 'Unknown'
+      ? `  ${r.name}() { return this.${r.type}(${r.related}) }`
+      : `  // TODO: import the related model, then uncomment\n  // ${r.name}() { return this.${r.type}(Related) }`)).join('\n')
     : (withComments ? `  // posts()   { return this.hasMany(Post) }\n  // profile() { return this.hasOne(Profile) }` : '')
+  const importBlock = relationImports.length
+    ? '\n' + relationImports.map(r => `import ${r} from './${r}.js'`).join('\n')
+    : ''
 
   // Scope stubs
   const scopeBlock = scopes.length
@@ -60,7 +69,7 @@ export function generateModelStub(schema, opts = {}) {
   // static async deleting(record) { }
   // static async deleted(record)  { }` : ''
 
-  return `import { Model } from '${importPath}'
+  return `import { Model } from '${importPath}'${importBlock}
 
 export default class ${name} extends Model {
   static table    = '${table}'
@@ -297,7 +306,7 @@ import { faker } from '@faker-js/faker'
 import ${name} from '${modelsPath}/${name}.js'
 
 export default class ${name}Factory extends Factory {
-  model = ${name}
+  static model = ${name}
 
   definition() {
     return {

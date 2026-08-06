@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'fs'
-import { resolve, dirname, join, basename } from 'path'
-import { fileURLToPath, pathToFileURL } from 'url'
+import { dirname, join } from 'path'
+import { pathToFileURL } from 'url'
 import { createRequire } from 'module'
 
 // ─── Terminal colors ───────────────────────────────────────────────────────
@@ -31,7 +31,12 @@ export function parseArgs(args) {
 
     for (const arg of args) {
         if (arg.startsWith('--')) {
-            const [key, val] = arg.slice(2).split('=')
+            // Split on the FIRST '=' only: `--url=postgres://u:p@h/db?x=1`
+            // lost everything after the second one.
+            const body = arg.slice(2)
+            const at = body.indexOf('=')
+            const key = at === -1 ? body : body.slice(0, at)
+            const val = at === -1 ? undefined : body.slice(at + 1)
             flags[key] = val !== undefined ? val : true
         } else if (arg.startsWith('-') && arg.length === 2) {
             flags[arg.slice(1)] = true

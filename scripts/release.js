@@ -21,6 +21,7 @@ import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { execSync } from 'child_process'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
+import { internalRange } from './internal-range.js'
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -300,9 +301,9 @@ for (const pkgDir of PACKAGES) {
     // Update internal @eloquentjs/* peer/dep versions to match
     for (const depField of ['dependencies', 'peerDependencies', 'devDependencies']) {
         if (!newPkg[depField]) continue
-        for (const [name, ver] of Object.entries(newPkg[depField])) {
+        for (const name of Object.keys(newPkg[depField])) {
             if (name.startsWith('@eloquentjs/')) {
-                newPkg[depField][name] = `^${nextVer}`
+                newPkg[depField][name] = internalRange(nextVer)
             }
         }
     }

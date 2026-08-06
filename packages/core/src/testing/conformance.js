@@ -16,27 +16,45 @@
  * and abstracting over it would cost more than it buys.
  */
 
-// Core calls exactly these. Keep in sync with RESOLVER.md.
+/**
+ * Required: core calls these unguarded, so a driver without them is broken.
+ * Keep in sync with RESOLVER.md and the ModelResolver typedef in Model.js —
+ * those three used to disagree about which methods were optional.
+ */
 export const REQUIRED_METHODS = [
   // reads
-  'select', 'aggregate', 'toSQL',
+  'select',
   // writes
-  'insert', 'insertMany', 'update', 'delete', 'increment', 'truncate',
-  // relations
+  'insert', 'update', 'delete', 'truncate',
+]
+
+/**
+ * Optional: core checks for these and raises a clear error when they are
+ * missing, so a store that genuinely cannot support one may omit it.
+ * Every driver in this repo implements all of them except where noted.
+ */
+export const OPTIONAL_METHODS = [
+  'raw', 'transaction',
+  'aggregate', 'toSQL', 'insertMany', 'increment', 'upsert',
   'selectPivot', 'selectPivotMany', 'hasManyThrough', 'hasManyThroughMany',
-  // schema
   'createTable', 'alterTable', 'dropTable', 'renameTable',
   'hasTable', 'hasColumn', 'getColumnListing',
 ]
 
-export const OPTIONAL_METHODS = ['raw', 'transaction']
+/**
+ * Methods the drivers shipped in this repo are all expected to provide.
+ * Distinct from REQUIRED_METHODS: a third-party resolver may skip these,
+ * but ours must not regress.
+ */
+export const EXPECTED_METHODS = [...REQUIRED_METHODS, ...OPTIONAL_METHODS.filter(m => m !== 'upsert')]
 
 /** Minimum arity core relies on, where a resolver cannot get away with fewer. */
 const MIN_ARITY = {
   select: 2, aggregate: 4, toSQL: 2,
   insert: 2, insertMany: 2, update: 3, delete: 2, increment: 5, truncate: 1,
   createTable: 2, alterTable: 2, dropTable: 1, renameTable: 2,
-  hasTable: 1, getColumnListing: 1,
+  hasTable: 1, hasColumn: 2, getColumnListing: 1,
+  transaction: 1,
 }
 
 /**
@@ -55,11 +73,15 @@ export function describeResolverShape(name, makeResolver) {
       expect(resolver).toBeTruthy()
     })
 
-    test.each(REQUIRED_METHODS)('implements %s()', (method) => {
+    test.each(REQUIRED_METHODS)('implements %s() (required)', (method) => {
       expect(typeof resolver[method]).toBe('function')
     })
 
-    test.each(REQUIRED_METHODS)('%s() is async', (method) => {
+    test.each(EXPECTED_METHODS)('implements %s()', (method) => {
+      expect(typeof resolver[method]).toBe('function')
+    })
+
+    test.each(EXPECTED_METHODS)('%s() is async', (method) => {
       // Everything core awaits must return a promise, or error handling and
       // transaction ordering break in ways that only show up under load.
       expect(resolver[method].constructor.name).toBe('AsyncFunction')

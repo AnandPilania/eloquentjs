@@ -7,7 +7,7 @@ export async function cmdMigrateFresh(ctx) {
   const { dropped } = await dropAllTables(ctx)
   if (dropped > 0) console.log()
 
-  const { ran, batch } = await runMigrations(ctx)
+  const { ran } = await runMigrations(ctx)
 
   console.log(`\n${colors.green}✔${colors.reset}  Fresh migration complete: dropped ${dropped} table${dropped !== 1 ? 's' : ''}, ran ${ran} migration${ran !== 1 ? 's' : ''}.`)
 

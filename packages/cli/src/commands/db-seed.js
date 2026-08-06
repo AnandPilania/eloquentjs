@@ -1,7 +1,7 @@
 import { resolve } from 'path'
 import { pathToFileURL } from 'node:url'
 import { existsSync } from 'fs'
-import { colors, success, info, error, resolveConfig, loadConnection, toPascalCase } from '../utils.js'
+import { colors, success, resolveConfig, loadConnection, toPascalCase } from '../utils.js'
 
 export async function cmdDbSeed(ctx) {
   const { cwd, flags } = ctx
@@ -28,9 +28,8 @@ export async function cmdDbSeed(ctx) {
   }
 
   // Ensure DB connection is available
-  let connection
   try {
-    connection = await loadConnection(ctx)
+    await loadConnection(ctx)
   } catch (err) {
     throw new Error(`Cannot connect to database: ${err.message}`)
   }

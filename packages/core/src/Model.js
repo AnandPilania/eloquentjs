@@ -18,7 +18,7 @@
  *     // Mutator
  *     setPasswordAttribute(v) { return bcrypt.hashSync(v, 10) }
  *
- *     // Local scopes — accessed via User.scope('active') or User.active()
+ *     // Local scopes — accessed via User.scope('active') or withScopes(User).active()
  *     static scopeActive(qb)       { return qb.where('active', true) }
  *     static scopeOlderThan(qb, n) { return qb.where('age', '>', n) }
  *
@@ -31,11 +31,10 @@
 import { randomUUID } from 'crypto'
 import { QueryBuilder } from './QueryBuilder.js'
 import { Collection } from './Collection.js'
-import { EventEmitter } from './EventEmitter.js'
 import { HookRegistry } from './HookRegistry.js'
 import { CastRegistry } from './CastRegistry.js'
 import { getResolver } from './ConnectionRegistry.js'
-import { ModelNotFoundException } from './errors.js'
+import { ModelNotFoundException, MassAssignmentException } from './errors.js'
 import { RelationRegistry } from './relations/RelationRegistry.js'
 import { toSnakePlural, toPascalCase } from './utils.js'
 
@@ -48,6 +47,7 @@ const _original = new WeakMap()
 const _rels = new WeakMap()
 const _exists = new WeakMap()
 const _trashed = new WeakMap()
+const _changes = new WeakMap()   // what the last save() actually wrote — wasChanged()
 const SELF = Symbol('self')  // proxy[SELF] → raw instance
 
 // Classes with mass assignment disabled. Per-class, inherited down the chain:
@@ -59,17 +59,24 @@ const _unguardedClasses = new WeakSet()
 function raw(obj) { return obj[SELF] ?? obj }
 
 /**
- * The Resolver Contract — see packages/core/RESOLVER.md.
- * A driver (mongodb, pgsql, sqlite, ...) implements this to plug into Model/QueryBuilder.
- * Schema/relation/aggregate methods are optional: a store that can't support them
- * should throw a clear error instead (see @eloquentjs/mongodb's pivot methods).
+ * The Resolver Contract — see packages/core/RESOLVER.md, and the machine-checked
+ * version in core/src/testing/conformance.js. Those three are kept in step.
+ *
+ * A driver (mongodb, pgsql, sqlite, ...) implements this to plug into
+ * Model/QueryBuilder. Only `select`, `insert`, `update`, `delete` and `truncate`
+ * are required; everything marked optional below is guarded at the call site and
+ * raises a clear error naming the driver when absent.
+ *
  * @typedef {Object} ModelResolver
  * @property {(table: string, ctx: any) => Promise<Record<string, any>[]>} select
  * @property {(table: string, data: Record<string, any>) => Promise<Record<string, any> & {insertedId?: any}>} insert
  * @property {(table: string, rows: Record<string, any>[]) => Promise<Record<string, any>[]>} [insertMany]
  * @property {(table: string, conditions: Record<string, any>, data: Record<string, any>, ctx?: any) => Promise<number>} update
  * @property {(table: string, conditions: Record<string, any>, ctx?: any) => Promise<number>} delete
- * @property {(table: string) => Promise<void>} truncate
+ * @property {(table: string, opts?: {cascade?: boolean, restartIdentity?: boolean}) => Promise<void>} truncate
+ * @property {(table: string, rows: Record<string, any>[], uniqueBy: string[], update: string[]|null) => Promise<number>} [upsert]
+ * @property {(sql: string, params?: any[]) => Promise<any>} [raw]
+ * @property {boolean} [supportsJoins] false when the store cannot JOIN (mongodb)
  * @property {(table: string, fn: 'count'|'sum'|'avg'|'min'|'max', column: string, ctx: any) => Promise<number>} [aggregate]
  * @property {(table: string, ctx: any) => Promise<{sql: string, params: any[]} | Record<string, any>>} [toSQL]
  * @property {(table: string, column: string, amount: number, extra: Record<string, any>, ctx: any) => Promise<number>} [increment]
@@ -79,13 +86,45 @@ function raw(obj) { return obj[SELF] ?? obj }
  * @property {(opts: Record<string, any>) => Promise<Record<string, any>[]>} [hasManyThroughMany]
  * @property {(table: string, blueprint: any) => Promise<void>} [createTable]
  * @property {(table: string, blueprint: any) => Promise<void>} [alterTable]
- * @property {(table: string, opts?: {ifExists?: boolean}) => Promise<void>} [dropTable]
+ * @property {(table: string, opts?: {ifExists?: boolean, cascade?: boolean}) => Promise<void>} [dropTable]
  * @property {(from: string, to: string) => Promise<void>} [renameTable]
  * @property {(table: string) => Promise<boolean>} [hasTable]
  * @property {(table: string, column: string) => Promise<boolean>} [hasColumn]
  * @property {(table: string) => Promise<string[]>} [getColumnListing]
- * @property {(fn: (session: any) => Promise<any>) => Promise<any>} [transaction]
+ * @property {(fn: (tx: ModelResolver) => Promise<any>) => Promise<any>} [transaction]
  */
+
+// ─── Attribute ───────────────────────────────────────────────────────────────
+/**
+ * A get/set pair for one attribute, declared in one place — Laravel 9's
+ * `Attribute::make(get:, set:)`.
+ *
+ *   class User extends Model {
+ *     get full_name() {
+ *       return Attribute.make({
+ *         get: (value, attrs) => `${attrs.first_name} ${attrs.last_name}`,
+ *       })
+ *     }
+ *     get email() {
+ *       return Attribute.make({ set: v => String(v).toLowerCase() })
+ *     }
+ *   }
+ *
+ * Declared as a **getter** (or an instance field), not a method: PHP can tell
+ * `$user->email` from `$user->email()`, JS cannot, so a method named after the
+ * attribute would shadow the attribute on every read. `set` may return an
+ * object to write several columns at once.
+ */
+export class Attribute {
+    /** @param {{get?: (value: any, attributes: Record<string, any>) => any, set?: (value: any, attributes: Record<string, any>) => any}} pair */
+    constructor({ get, set } = {}) {
+        this.get = get
+        this.set = set
+    }
+
+    /** @param {{get?: (value: any, attributes: Record<string, any>) => any, set?: (value: any, attributes: Record<string, any>) => any}} pair */
+    static make(pair = {}) { return new Attribute(pair) }
+}
 
 // ─── Model ───────────────────────────────────────────────────────────────────
 export class Model {
@@ -98,9 +137,21 @@ export class Model {
     static incrementing = true
 
     /** @type {string[]} */
-    static fillable = []        // [] means nothing is fillable unless guarded is also []
-    /** @type {string[]} */
-    static guarded = ['id']    // ['*'] to guard all; [] to allow all
+    static fillable = []        // [] means nothing is fillable unless guarded is []
+    /**
+     * Everything is guarded until you opt in with `fillable`, matching Laravel's
+     * default. `[]` allows all keys (unsafe with untrusted input); a list guards
+     * exactly those columns.
+     * @type {string[]}
+     */
+    static guarded = ['*']
+
+    /**
+     * Throw MassAssignmentException instead of silently dropping keys that
+     * fillable/guarded disallows. Off by default (Laravel's default too), but
+     * worth enabling in development.
+     */
+    static strictFill = false
 
     /** @type {Record<string, string>} */
     static casts = {}
@@ -121,6 +172,26 @@ export class Model {
     /** @type {Record<string, (qb: QueryBuilder) => void>} */
     static globalScopes = {}   // { name: qb => qb.where(...) }
     static connection = 'default'
+
+    /**
+     * Default attribute values for new instances. Functions are called per
+     * instance, so `{ uuid: () => randomUUID() }` is safe.
+     * @type {Record<string, any>}
+     */
+    static attributes = {}
+
+    /**
+     * Relations always eager-loaded — Laravel's `$with`. Named `withRelations`
+     * because `static with()` is the query shorthand.
+     * @type {string[]}
+     */
+    static withRelations = []
+
+    /**
+     * Relations whose parent is touched when this model is saved — `$touches`.
+     * @type {string[]}
+     */
+    static touches = []
 
     // ─── Private instance state ────────────────────────────────────────────────
     // NOTE: Private fields are accessible across instances of the same class
@@ -144,6 +215,11 @@ export class Model {
         _rels.set(raw(this), {})
         _exists.set(raw(this), false)
         _trashed.set(raw(this), false)
+        _changes.set(raw(this), {})
+        // Column defaults, like Laravel's $attributes
+        for (const [k, v] of Object.entries(/** @type {typeof Model} */(this.constructor).attributes)) {
+            _attrs.get(raw(this))[k] = typeof v === 'function' ? v() : v
+        }
         this._fillRaw(attributes)
 
         // Wrap in Proxy for transparent attribute access
@@ -220,7 +296,26 @@ export class Model {
             qb._wheres.push({ type: 'null', column: this.deletedAtColumn, boolean: 'and', _scope: '_softDelete' })
         }
 
+        // Default eager loads
+        if (this.withRelations.length) qb.with(...this.withRelations)
+
         return qb
+    }
+
+    /**
+     * Apply a named local scope: `User.scope('active')` runs `scopeActive(qb)`.
+     * Extra arguments are forwarded — `User.scope('olderThan', 30)`.
+     * @param {string} name
+     * @param {...any} args
+     * @returns {QueryBuilder}
+     */
+    static scope(name, ...args) {
+        const method = `scope${toPascalCase(name)}`
+        if (typeof this[method] !== 'function') {
+            throw new Error(`[EloquentJS] ${this.name} has no scope "${name}" (expected static ${method}())`)
+        }
+        const qb = this.query()
+        return this[method](qb, ...args) ?? qb
     }
 
     // ─── Scope proxy — makes User.active() work ────────────────────────────────
@@ -245,7 +340,27 @@ export class Model {
     static whereMonth(...a) { return this.query().whereMonth(...a) }
     static whereDay(...a) { return this.query().whereDay(...a) }
     static whereJsonContains(...a) { return this.query().whereJsonContains(...a) }
+    static whereTime(column, operator, value) { return this.query().whereTime(column, operator, value) }
+    static whereColumn(first, operator, second) { return this.query().whereColumn(first, operator, second) }
+    static whereExists(Related, cb) { return this.query().whereExists(Related, cb) }
+    static whereNotExists(Related, cb) { return this.query().whereNotExists(Related, cb) }
+    static whereHas(relation, cb) { return this.query().whereHas(relation, cb) }
+    static orWhereHas(relation, cb) { return this.query().orWhereHas(relation, cb) }
+    static whereDoesntHave(relation, cb) { return this.query().whereDoesntHave(relation, cb) }
+    static has(relation, cb) { return this.query().has(relation, cb) }
+    static doesntHave(relation, cb) { return this.query().doesntHave(relation, cb) }
+    static withCount(...a) { return this.query().withCount(...a) }
+    static withExists(...a) { return this.query().withExists(...a) }
+    static withSum(...a) { return this.query().withSum(...a) }
+    static when(...a) { return this.query().when(...a) }
+    static unless(...a) { return this.query().unless(...a) }
     static select(...a) { return this.query().select(...a) }
+    static selectRaw(...a) { return this.query().selectRaw(...a) }
+    static orderByRaw(...a) { return this.query().orderByRaw(...a) }
+    static havingRaw(...a) { return this.query().havingRaw(...a) }
+    static groupByRaw(...a) { return this.query().groupByRaw(...a) }
+    static lockForUpdate() { return this.query().lockForUpdate() }
+    static sharedLock() { return this.query().sharedLock() }
     static addSelect(...a) { return this.query().addSelect(...a) }
     static orderBy(...a) { return this.query().orderBy(...a) }
     static orderByDesc(c) { return this.query().orderByDesc(c) }
@@ -321,7 +436,14 @@ export class Model {
     static async pluck(col, key) { return this.query().pluck(col, key) }
     static async value(col) { return this.query().value(col) }
     static async chunk(n, fn) { return this.query().chunk(n, fn) }
+    static async chunkById(n, fn) { return this.query().chunkById(n, fn) }
     static async paginate(p, pp) { return this.query().paginate(p, pp) }
+    static async simplePaginate(p, pp) { return this.query().simplePaginate(p, pp) }
+    static async cursorPaginate(pp, cursor) { return this.query().cursorPaginate(pp, cursor) }
+    static async sole() { return this.query().sole() }
+    static async firstWhere(...a) { return this.query().where(...a).first() }
+    static lazy(n) { return this.query().lazy(n) }
+    static cursor() { return this.query().cursor() }
 
     /**
      * @template {typeof Model} T
@@ -369,8 +491,91 @@ export class Model {
         return m
     }
 
-    static async truncate() {
-        return this.getResolver().truncate(this.getTable())
+    /**
+     * The records eligible for pruning — Laravel's Prunable. Override to opt in:
+     *
+     *   static prunable() { return this.where('created_at', '<', cutoff) }
+     *
+     * @returns {QueryBuilder|null}
+     */
+    static prunable() { return null }
+
+    /**
+     * Delete everything `prunable()` matches, in chunks, firing `pruning` per
+     * record. Soft-deleting models are force-deleted — pruning is meant to
+     * reclaim the row, not to trash it again.
+     * @param {{chunk?: number}} opts
+     * @returns {Promise<number>} how many records were deleted
+     */
+    static async prune({ chunk = 1000 } = {}) {
+        const qb = this.prunable()
+        if (!qb) {
+            throw new Error(`[EloquentJS] ${this.name} is not prunable — define static prunable().`)
+        }
+        const hooks = HookRegistry.for(this)
+        let pruned = 0
+        // chunkById, not chunk: the callback deletes the rows it was handed, and
+        // OFFSET paging would skip a page's worth of records each round.
+        await qb.chunkById(chunk, async models => {
+            for (const model of models) {
+                await hooks.fire('pruning', model)
+                if (this.softDeletes) await model.forceDelete()
+                else await model.delete()
+                pruned++
+            }
+        })
+        return pruned
+    }
+
+    static async truncate(opts = {}) {
+        return this.getResolver().truncate(this.getTable(), opts)
+    }
+
+    /**
+     * Insert rows, updating the ones that collide on `uniqueBy`.
+     * @param {Record<string, any>[]} rows
+     * @param {string|string[]} uniqueBy
+     * @param {string[]} [update] columns to overwrite; defaults to all non-key columns
+     */
+    static async upsert(rows, uniqueBy, update = null) {
+        return this.query().upsert(rows, uniqueBy, update)
+    }
+
+    static async updateOrInsert(conditions, values = {}) {
+        return this.query().updateOrInsert(conditions, values)
+    }
+
+    /** Register an observer object — Model.observe(new UserObserver()). */
+    static observe(observer) {
+        HookRegistry.observe(this, observer)
+        return this
+    }
+
+    /** Register a single lifecycle hook. Returns an unregister function. */
+    static on(event, fn) {
+        return HookRegistry.register(this, event, fn)
+    }
+
+    /** Run `callback` with timestamps disabled for this class. */
+    static async withoutTimestamps(callback) {
+        const previous = this.timestamps
+        this.timestamps = false
+        try { return await callback() } finally { this.timestamps = previous }
+    }
+
+    /** The column route parameters resolve against — override for slugs. */
+    static getRouteKeyName() { return this.primaryKey }
+
+    static async resolveRouteBinding(value, field = null) {
+        return this.query().where(field ?? this.getRouteKeyName(), value).first()
+    }
+
+    static async increment(column, amount = 1, extra = {}) {
+        return this.query().increment(column, amount, extra)
+    }
+
+    static async decrement(column, amount = 1, extra = {}) {
+        return this.query().decrement(column, amount, extra)
     }
 
     // ─── Mass assignment ──────────────────────────────────────────────────────
@@ -388,13 +593,22 @@ export class Model {
             return keys
         }
 
-        if (Klass.guarded.includes('*')) {
-            return Klass.fillable.length > 0 ? keys.filter(k => Klass.fillable.includes(k)) : []
-        }
+        let allowed
         if (Klass.fillable.length > 0) {
-            return keys.filter(k => Klass.fillable.includes(k))
+            allowed = keys.filter(k => Klass.fillable.includes(k))
+        } else if (Klass.guarded.includes('*')) {
+            allowed = []
+        } else {
+            allowed = keys.filter(k => !Klass.guarded.includes(k))
         }
-        return keys.filter(k => !Klass.guarded.includes(k))
+
+        if (Klass.strictFill && allowed.length !== keys.length) {
+            const blocked = keys.filter(k => !allowed.includes(k))
+            throw new MassAssignmentException(
+                `Add [${blocked.join(', ')}] to ${Klass.name}'s fillable to allow mass assignment.`
+            )
+        }
+        return allowed
     }
 
     fill(attributes = {}) {
@@ -414,9 +628,37 @@ export class Model {
     }
 
     // ─── Attribute get / set ──────────────────────────────────────────────────
+    /**
+     * The `Attribute` object declared for `key`, if the class declares one.
+     * Looked up on the raw instance so the Proxy cannot turn the getter's
+     * result into an attribute read, and never invokes a plain method — a
+     * function descriptor is not an Attribute.
+     * @param {string} key
+     * @returns {Attribute|null}
+     */
+    _attributeObject(key) {
+        const desc = findDescriptor(raw(this), key)
+        if (!desc) return null
+        const value = desc.get ? desc.get.call(this) : desc.value
+        return value instanceof Attribute ? value : null
+    }
+
     setAttribute(key, value) {
         const Klass = /** @type {typeof Model} */ (this.constructor)
         const mutator = `set${toPascalCase(key)}Attribute`
+
+        const attr = this._attributeObject(key)
+        if (attr?.set) {
+            const out = attr.set(value, this.getAttributes())
+            // Returning an object writes several columns at once, as Laravel's
+            // array return does.
+            if (out !== null && typeof out === 'object' && !(out instanceof Date) && !Array.isArray(out)) {
+                Object.assign(_attrs.get(raw(this)), out)
+            } else {
+                _attrs.get(raw(this))[key] = out
+            }
+            return this
+        }
 
         if (typeof this[mutator] === 'function') {
             _attrs.get(raw(this))[key] = this[mutator](value)
@@ -433,6 +675,9 @@ export class Model {
         const accessor = `get${toPascalCase(key)}Attribute`
         const rawVal = _attrs.get(raw(this))[key]
 
+        const attr = this._attributeObject(key)
+        if (attr?.get) return attr.get(rawVal, this.getAttributes())
+
         if (typeof this[accessor] === 'function') {
             return this[accessor](rawVal)
         }
@@ -441,6 +686,7 @@ export class Model {
 
     getAttributes() { return { ..._attrs.get(raw(this)) } }
     getRawAttribute(key) { return _attrs.get(raw(this))[key] }
+    unsetAttribute(key) { delete _attrs.get(raw(this))[key]; return this }
 
     getOriginal(key = null) {
         return key ? _original.get(raw(this))[key] : { ..._original.get(raw(this)) }
@@ -463,75 +709,150 @@ export class Model {
     }
 
     isClean(key = null) { return !this.isDirty(key) }
-    wasChanged(key) { return this.isDirty(key) }
+
+    /**
+     * Did the last save() actually write this attribute? (Eloquent semantics.)
+     * `isDirty()` answers the different question of pending changes.
+     * @param {string} [key]
+     */
+    wasChanged(key = null) {
+        const changes = _changes.get(raw(this)) ?? {}
+        return key ? Object.prototype.hasOwnProperty.call(changes, key) : Object.keys(changes).length > 0
+    }
+
+    /** The attributes written by the last save(), old → new. */
+    getChanges() { return { ...(_changes.get(raw(this)) ?? {}) } }
+
     existsInDb() { return _exists.get(raw(this)) }
 
+    /** Is this the same DB record as `other`? */
+    is(other) {
+        const Klass = /** @type {typeof Model} */ (this.constructor)
+        return !!other
+            && other.constructor === Klass
+            && String(this.getRawAttribute(Klass.primaryKey)) === String(other.getRawAttribute(Klass.primaryKey))
+    }
+
+    isNot(other) { return !this.is(other) }
+
+    /** An unsaved copy without the primary key or timestamps. */
+    replicate(except = []) {
+        const Klass = /** @type {typeof Model} */ (this.constructor)
+        const skip = new Set([
+            Klass.primaryKey, Klass.createdAtColumn, Klass.updatedAtColumn,
+            Klass.deletedAtColumn, ...except,
+        ])
+        const clone = new Klass()
+        for (const [k, v] of Object.entries(_attrs.get(raw(this)))) {
+            if (!skip.has(k)) _attrs.get(raw(clone))[k] = v
+        }
+        return clone
+    }
+
     // ─── Persist ──────────────────────────────────────────────────────────────
-    async save() {
+    /**
+     * Insert or update. Returns `this`; returns without writing when a
+     * `saving`/`creating`/`updating` hook returns false.
+     */
+    async save({ timestamps = true } = {}) {
         const Klass = /** @type {typeof Model} */ (this.constructor)
         const hooks = HookRegistry.for(Klass)
+        const attrs = _attrs.get(raw(this))
+        const useTimestamps = Klass.timestamps && timestamps !== false
         const now = new Date()
+
+        if (await hooks.fire('saving', this) === false) return this
 
         if (_exists.get(raw(this))) {
             // ─ UPDATE path ─────────────────────────────────────────────────────────
-            await hooks.fire('updating', this)
-            await EventEmitter.emit(`${Klass.name}:updating`, this)
-
-            if (Klass.timestamps) _attrs.get(raw(this))[Klass.updatedAtColumn] = now
-
-            const dirty = this.getDirty()
-            if (dirty.length > 0) {
-                const data = Object.fromEntries(dirty.map(k => [k, _attrs.get(raw(this))[k]]))
-                await Klass.getResolver().update(
-                    Klass.getTable(),
-                    { [Klass.primaryKey]: _attrs.get(raw(this))[Klass.primaryKey] },
-                    data
-                )
-                this._syncOriginal()
+            // Dirtiness is computed BEFORE touching updated_at, otherwise every
+            // save() would look dirty and issue a pointless UPDATE.
+            if (!this.getDirty().length) {
+                _changes.set(raw(this), {})
+                return this
             }
 
+            if (await hooks.fire('updating', this) === false) return this
+
+            if (useTimestamps) attrs[Klass.updatedAtColumn] = now
+
+            const dirty = this.getDirty()
+            const data = Object.fromEntries(dirty.map(k => [k, attrs[k]]))
+            await Klass.getResolver().update(
+                Klass.getTable(),
+                { [Klass.primaryKey]: attrs[Klass.primaryKey] },
+                data
+            )
+            this._recordChanges(dirty)
+            this._syncOriginal()
+
             await hooks.fire('updated', this)
-            await EventEmitter.emit(`${Klass.name}:updated`, this)
 
         } else {
             // ─ INSERT path ─────────────────────────────────────────────────────────
-            await hooks.fire('creating', this)
-            await EventEmitter.emit(`${Klass.name}:creating`, this)
+            if (await hooks.fire('creating', this) === false) return this
 
-            if (Klass.timestamps) {
-                _attrs.get(raw(this))[Klass.createdAtColumn] = now
-                _attrs.get(raw(this))[Klass.updatedAtColumn] = now
+            if (useTimestamps) {
+                attrs[Klass.createdAtColumn] = now
+                attrs[Klass.updatedAtColumn] = now
             }
 
-            if (!_attrs.get(raw(this))[Klass.primaryKey]) {
-                if (Klass.keyType === 'uuid') {
-                    _attrs.get(raw(this))[Klass.primaryKey] = randomUUID()
-                }
+            if (!attrs[Klass.primaryKey] && Klass.keyType === 'uuid') {
+                attrs[Klass.primaryKey] = randomUUID()
             }
 
-            const result = await Klass.getResolver().insert(Klass.getTable(), _attrs.get(raw(this)))
+            const result = await Klass.getResolver().insert(Klass.getTable(), attrs)
 
             // Driver returns inserted row (pg RETURNING *) or { insertedId } (mongo)
             if (result) {
                 if (result[Klass.primaryKey] !== undefined) {
-                    _attrs.get(raw(this))[Klass.primaryKey] = result[Klass.primaryKey]
+                    attrs[Klass.primaryKey] = result[Klass.primaryKey]
                 } else if (result.insertedId !== undefined) {
-                    _attrs.get(raw(this))[Klass.primaryKey] = result.insertedId.toString()
+                    attrs[Klass.primaryKey] = result.insertedId.toString()
                 }
                 // Merge any driver-generated defaults back into attrs
                 for (const [k, v] of Object.entries(result)) {
-                    if (_attrs.get(raw(this))[k] === undefined) _attrs.get(raw(this))[k] = v
+                    if (attrs[k] === undefined) attrs[k] = v
                 }
             }
 
             _exists.set(raw(this), true)
+            this._recordChanges(Object.keys(attrs))
             this._syncOriginal()
 
             await hooks.fire('created', this)
-            await EventEmitter.emit(`${Klass.name}:created`, this)
         }
 
+        await hooks.fire('saved', this)
+        await this._touchOwners()
         return this
+    }
+
+    /** Save without updating timestamps — Laravel's withoutTimestamps(). */
+    async saveQuietly() { return this.save({ timestamps: false }) }
+
+    _recordChanges(keys) {
+        const attrs = _attrs.get(raw(this))
+        const original = _original.get(raw(this))
+        _changes.set(raw(this), Object.fromEntries(keys.map(k => [k, { from: original[k], to: attrs[k] }])))
+    }
+
+    /** Bump updated_at on the relations listed in `static touches`. */
+    async _touchOwners() {
+        const Klass = /** @type {typeof Model} */ (this.constructor)
+        for (const name of Klass.touches) {
+            const rel = typeof this[name] === 'function' ? this[name]() : null
+            const owner = await rel?.get?.()
+            for (const model of [owner].flat().filter(Boolean)) await model.touch()
+        }
+    }
+
+    /** Set updated_at to now and save. */
+    async touch() {
+        const Klass = /** @type {typeof Model} */ (this.constructor)
+        if (!Klass.timestamps) return this
+        _attrs.get(raw(this))[Klass.updatedAtColumn] = new Date()
+        return this.save()
     }
 
     async update(attributes = {}) {
@@ -539,12 +860,22 @@ export class Model {
         return this.save()
     }
 
+    /** Save this model and every loaded relation below it — Eloquent's push(). */
+    async push() {
+        await this.save()
+        for (const value of Object.values(_rels.get(raw(this)))) {
+            for (const model of [value].flat().filter(Boolean)) {
+                if (typeof model?.push === 'function') await model.push()
+            }
+        }
+        return this
+    }
+
     async delete() {
         const Klass = /** @type {typeof Model} */ (this.constructor)
         const hooks = HookRegistry.for(Klass)
 
-        await hooks.fire('deleting', this)
-        await EventEmitter.emit(`${Klass.name}:deleting`, this)
+        if (await hooks.fire('deleting', this) === false) return
 
         if (Klass.softDeletes) {
             // Soft delete: set deleted_at, skip deleting/deleted hooks in save()
@@ -570,15 +901,14 @@ export class Model {
         }
 
         await hooks.fire('deleted', this)
-        await EventEmitter.emit(`${Klass.name}:deleted`, this)
     }
 
     async forceDelete() {
         const Klass = /** @type {typeof Model} */ (this.constructor)
         const hooks = HookRegistry.for(Klass)
 
-        await hooks.fire('deleting', this)
-        await EventEmitter.emit(`${Klass.name}:deleting`, this)
+        if (await hooks.fire('forceDeleting', this) === false) return
+        if (await hooks.fire('deleting', this) === false) return
 
         await Klass.getResolver().delete(
             Klass.getTable(),
@@ -588,7 +918,7 @@ export class Model {
         _trashed.set(raw(this), false)
 
         await hooks.fire('deleted', this)
-        await EventEmitter.emit(`${Klass.name}:deleted`, this)
+        await hooks.fire('forceDeleted', this)
     }
 
     async restore() {
@@ -596,8 +926,7 @@ export class Model {
         if (!Klass.softDeletes) return this
 
         const hooks = HookRegistry.for(Klass)
-        await hooks.fire('restoring', this)
-        await EventEmitter.emit(`${Klass.name}:restoring`, this)
+        if (await hooks.fire('restoring', this) === false) return this
 
         _attrs.get(raw(this))[Klass.deletedAtColumn] = null
         _trashed.set(raw(this), false)
@@ -610,7 +939,6 @@ export class Model {
         this._syncOriginal()
 
         await hooks.fire('restored', this)
-        await EventEmitter.emit(`${Klass.name}:restored`, this)
 
         return this
     }
@@ -641,6 +969,14 @@ export class Model {
     hasOne(Related, foreignKey, localKey) {
         return RelationRegistry.hasOne(this, Related, foreignKey, localKey)
     }
+    /**
+     * The one related row that wins on `column` — `latestOfMany()` in short form.
+     *   latestPost() { return this.hasOneOfMany(Post) }
+     *   firstPost()  { return this.hasOneOfMany(Post, 'created_at', 'MIN') }
+     */
+    hasOneOfMany(Related, column, aggregate, foreignKey, localKey) {
+        return RelationRegistry.hasOneOfMany(this, Related, column, aggregate, foreignKey, localKey)
+    }
     hasMany(Related, foreignKey, localKey) {
         return RelationRegistry.hasMany(this, Related, foreignKey, localKey)
     }
@@ -650,8 +986,11 @@ export class Model {
     belongsToMany(Related, pivotTable, foreignKey, relatedKey) {
         return RelationRegistry.belongsToMany(this, Related, pivotTable, foreignKey, relatedKey)
     }
-    hasManyThrough(Related, Through, firstKey, secondKey) {
-        return RelationRegistry.hasManyThrough(this, Related, Through, firstKey, secondKey)
+    hasManyThrough(Related, Through, firstKey, secondKey, localKey, throughKey) {
+        return RelationRegistry.hasManyThrough(this, Related, Through, firstKey, secondKey, localKey, throughKey)
+    }
+    hasOneThrough(Related, Through, firstKey, secondKey, localKey, throughKey) {
+        return RelationRegistry.hasOneThrough(this, Related, Through, firstKey, secondKey, localKey, throughKey)
     }
     morphTo(name) {
         return RelationRegistry.morphTo(this, name)
@@ -662,6 +1001,22 @@ export class Model {
     morphOne(Related, name) {
         return RelationRegistry.morphOne(this, Related, name)
     }
+    morphToMany(Related, name, pivotTable, relatedKey) {
+        return RelationRegistry.morphToMany(this, Related, name, pivotTable, relatedKey)
+    }
+    morphedByMany(Related, name, pivotTable, relatedKey) {
+        return RelationRegistry.morphedByMany(this, Related, name, pivotTable, relatedKey)
+    }
+
+    /**
+     * Store a withCount()/withSum() result. Written straight to the attribute
+     * bag *and* to `_original`, so it never shows up as a dirty column.
+     */
+    setRelationAggregate(alias, value) {
+        _attrs.get(raw(this))[alias] = value
+        _original.get(raw(this))[alias] = value
+        return this
+    }
 
     setRelation(name, value) { _rels.get(raw(this))[name] = value; return this }
     getRelation(name) { return _rels.get(raw(this))[name] }
@@ -670,24 +1025,42 @@ export class Model {
     getRelations() { return { ..._rels.get(raw(this)) } }
 
     // ─── Serialization ────────────────────────────────────────────────────────
+    /**
+     * Whether a key survives the hidden/visible filters. `visible` wins when
+     * both name the same key, matching Eloquent — and it applies to appended
+     * attributes and relations too, not only real columns.
+     * @param {string} key
+     */
+    _isVisible(key) {
+        const Klass = /** @type {typeof Model} */ (this.constructor)
+        if (Klass.visible.length > 0) return Klass.visible.includes(key)
+        return !Klass.hidden.includes(key)
+    }
+
     toJSON() {
         const Klass = /** @type {typeof Model} */ (this.constructor)
         const out = {}
 
         for (const [key, rawVal] of Object.entries(_attrs.get(raw(this)))) {
-            if (Klass.hidden.includes(key)) continue
-            if (Klass.visible.length > 0 && !Klass.visible.includes(key)) continue
-            out[key] = CastRegistry.serialize(Klass.casts[key], rawVal)
+            if (!this._isVisible(key)) continue
+            // An accessor overrides the stored value, as it does on read.
+            const accessor = `get${toPascalCase(key)}Attribute`
+            if (this._attributeObject(key)?.get) out[key] = this.getAttribute(key)
+            else if (typeof this[accessor] === 'function') out[key] = this[accessor](rawVal)
+            else out[key] = CastRegistry.serialize(Klass.casts[key], rawVal)
         }
 
         // Appended virtual attributes
         for (const key of Klass.appends) {
+            if (!this._isVisible(key)) continue
             const accessor = `get${toPascalCase(key)}Attribute`
-            if (typeof this[accessor] === 'function') out[key] = this[accessor]()
+            if (this._attributeObject(key)?.get) out[key] = this.getAttribute(key)
+            else if (typeof this[accessor] === 'function') out[key] = this[accessor]()
         }
 
         // Loaded relations
         for (const [key, value] of Object.entries(_rels.get(raw(this)))) {
+            if (!this._isVisible(key)) continue
             if (Array.isArray(value) || value instanceof Collection) {
                 out[key] = value.map(v => v?.toJSON?.() ?? v)
             } else {
@@ -699,6 +1072,19 @@ export class Model {
     }
 
     toString() { return JSON.stringify(this.toJSON()) }
+
+    /** Eager-load relations onto an already-fetched model. */
+    async load(...relations) {
+        const Klass = /** @type {typeof Model} */ (this.constructor)
+        await Klass.query()._eagerLoad([this], relations.flat())
+        return this
+    }
+
+    /** Like load(), but skips relations that are already loaded. */
+    async loadMissing(...relations) {
+        const missing = relations.flat().filter(r => !this.relationLoaded(String(r).split('.')[0]))
+        return missing.length ? this.load(missing) : this
+    }
 
     // ─── Internal: used by _hydrate and refresh() ─────────────────────────────
     _syncOriginal() {
@@ -792,7 +1178,14 @@ const modelProxyHandler = {
                 return ownDescriptor.value.bind(receiver)
             }
             if (ownDescriptor.get) {
-                return ownDescriptor.get.call(receiver)
+                const value = ownDescriptor.get.call(receiver)
+                // `get full_name() { return Attribute.make(...) }` declares an
+                // accessor, so the read resolves it rather than handing back the
+                // Attribute object itself.
+                return value instanceof Attribute ? target.getAttribute(prop) : value
+            }
+            if (ownDescriptor.value instanceof Attribute) {
+                return target.getAttribute(prop)
             }
             if (ownDescriptor.value !== undefined) {
                 return ownDescriptor.value
@@ -803,9 +1196,10 @@ const modelProxyHandler = {
         const rawAttr = target.getRawAttribute(prop)
         if (rawAttr !== undefined) return target.getAttribute(prop)
 
-        // Virtual attribute: an accessor method exists (getXxxAttribute)
-        const toPascal = s => s.replace(/(^|_)([a-z])/g, (_, __, c) => c.toUpperCase())
-        const accessor = `get${toPascal(prop)}Attribute`
+        // Virtual attribute: an accessor method exists (getXxxAttribute).
+        // Must use the shared toPascalCase, or Proxy reads and getAttribute()
+        // would disagree on hyphenated keys.
+        const accessor = `get${toPascalCase(prop)}Attribute`
         const accFn = findDescriptor(target, accessor)
         if (accFn && typeof accFn.value === 'function') {
             // Call with receiver so `this.name` reads through proxy
@@ -833,6 +1227,39 @@ const modelProxyHandler = {
         if (Reflect.has(target, prop)) return true
         if (target.relationLoaded(prop)) return true
         return target.getRawAttribute(prop) !== undefined
+    },
+
+    /** `delete user.name` must remove the attribute, not a property of the target. */
+    deleteProperty(target, prop) {
+        if (typeof prop === 'symbol') return Reflect.deleteProperty(target, prop)
+        if (target.relationLoaded(prop)) { target.unsetRelation(prop); return true }
+        if (target.getRawAttribute(prop) !== undefined) { target.unsetAttribute(prop); return true }
+        return Reflect.deleteProperty(target, prop)
+    },
+
+    /**
+     * Without these two, `Object.keys(user)`, `Object.entries(user)` and
+     * `{...user}` all came back empty — the attributes live in a WeakMap, not
+     * on the target.
+     */
+    ownKeys(target) {
+        return [...new Set([
+            ...Object.keys(target.getAttributes()),
+            ...Object.keys(target.getRelations()),
+        ])]
+    },
+
+    getOwnPropertyDescriptor(target, prop) {
+        if (typeof prop === 'string'
+            && (target.getRawAttribute(prop) !== undefined || target.relationLoaded(prop))) {
+            return {
+                value: target.relationLoaded(prop) ? target.getRelation(prop) : target.getAttribute(prop),
+                enumerable: true,
+                configurable: true,
+                writable: true,
+            }
+        }
+        return Reflect.getOwnPropertyDescriptor(target, prop)
     },
 }
 

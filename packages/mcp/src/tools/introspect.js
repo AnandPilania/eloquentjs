@@ -183,7 +183,7 @@ export async function handleListMigrations(args, ctx) {
   const allFiles = scanMigrations(dir)
 
   // Try to read run status from DB
-  let ranMap = new Map()
+  const ranMap = new Map()
   try {
     const conn = await (await import('@eloquentjs/cli/utils')).loadConnection(ctx)
     const rows = await conn.raw('SELECT migration, batch, ran_at FROM _migrations ORDER BY id ASC').catch(() => [])

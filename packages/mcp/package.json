@@ -33,9 +33,9 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "@eloquentjs/core": "^0.0.7",
-    "@eloquentjs/codegen": "^0.0.7",
-    "@eloquentjs/cli": "^0.0.7",
+    "@eloquentjs/core": ">=0.0.7 <0.1.0",
+    "@eloquentjs/codegen": ">=0.0.7 <0.1.0",
+    "@eloquentjs/cli": ">=0.0.7 <0.1.0",
     "@modelcontextprotocol/sdk": "^1.27.1"
   },
   "author": {
@@ -44,7 +44,8 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/AnandPilania/eloquentjs.git"
+    "url": "git+https://github.com/AnandPilania/eloquentjs.git",
+    "directory": "packages/mcp"
   },
   "bugs": {
     "url": "https://github.com/AnandPilania/eloquentjs/issues"
@@ -61,6 +62,7 @@
   ],
   "types": "dist-types/index.d.ts",
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json",
+    "prepublishOnly": "npm run build"
   }
 }

@@ -35,10 +35,33 @@ await User.find('64a7f...')   // ObjectId string
 
 ## MongoDB-Specific Features
 
+### `id` is an alias of `_id`, in both directions
+
+Documents store only `_id`. `id` is an alias, applied on reads *and* on every
+filter, sort, projection and update path — so the default
+`Model.primaryKey = 'id'` works and you do **not** need `static primaryKey = '_id'`.
+
 ```js
-// ObjectId handling — _id is automatically mapped to 'id'
-const user = await User.find('64a7f3b2c1a2b3c4d5e6f7a8')
-console.log(user.id)  // '64a7f3b2c1a2b3c4d5e6f7a8'
+// ObjectId handling — 'id' and '_id' are interchangeable
+const user = await User.find('64a7f3b2c1a2b3c4d5e6f7a8')   // filters on _id
+console.log(user.id)   // '64a7f3b2c1a2b3c4d5e6f7a8'
+console.log(user._id)  // same string
+
+user.name = 'Alice'
+await user.save()      // matches on _id, so it actually updates
+```
+
+`_id` is immutable, so it is stripped from update payloads rather than sent and
+rejected.
+
+### Not supported
+
+`belongsToMany()` and `hasManyThrough()` need a JOIN. The resolver declares
+`supportsJoins = false`, so those relations throw a clear error instead of
+silently ignoring the join and returning wrong rows. Use embedded arrays or an
+aggregation pipeline via `DB.raw()`.
+
+```js
 
 // Nested document queries
 await User.where('address.city', 'New York').get()

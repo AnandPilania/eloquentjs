@@ -10,9 +10,9 @@
  */
 
 import { existsSync, readdirSync, writeFileSync, mkdirSync } from 'fs'
-import { resolve, join, dirname, basename } from 'path'
+import { join, dirname } from 'path'
 import { pathToFileURL } from 'node:url'
-import { introspect, introspectAll } from './introspect.js'
+import { introspectAll } from './introspect.js'
 import {
   generateGraphqlSchema,
   generateTypeScriptFile,

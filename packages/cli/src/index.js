@@ -18,9 +18,12 @@
  *   eloquent db:seed --class=UserSeeder    — run specific seeder
  *   eloquent db:wipe                       — drop all tables
  *   eloquent list                          — list all commands
+ *
+ * Programmatic use — importing this module has no side effects:
+ *   import { run } from '@eloquentjs/cli'
+ *   const code = await run(['migrate', '--step=1'], { cwd })
  */
 
-import { argv, exit } from 'process'
 import { resolve } from 'path'
 import { existsSync, readFileSync } from 'fs'
 import { pathToFileURL } from 'node:url'
@@ -42,106 +45,90 @@ import { cmdGenerate } from './commands/generate.js'
 import { cmdList } from './commands/list.js'
 import { colors, parseArgs } from './utils.js'
 
-const args = argv.slice(2)
-const { command, flags, positional } = parseArgs(args)
-
-// Banner — version is read from the CLI's own package.json so it never drifts
-const pkgVersion = JSON.parse(
-    readFileSync(new URL('../package.json', import.meta.url), 'utf8')
-).version
-const titleLine = `  EloquentJS CLI  v${pkgVersion}`.padEnd(30)
-const banner = `${colors.cyan}╔══════════════════════════════╗
-║${titleLine}║
-╚══════════════════════════════╝${colors.reset}`
-
-if (!command || command === 'list' || command === '--help' || command === '-h') {
-    console.log(banner)
-    await cmdList()
-    exit(0)
+/** command name -> handler. One place to add a command. */
+const COMMANDS = {
+    'init': cmdInit,
+    'make:model': cmdMakeModel,
+    'make:migration': cmdMakeMigration,
+    'make:seeder': cmdMakeSeeder,
+    'make:factory': cmdMakeFactory,
+    'migrate': cmdMigrate,
+    'migrate:rollback': cmdMigrateRollback,
+    'migrate:reset': cmdMigrateReset,
+    'migrate:refresh': cmdMigrateRefresh,
+    'migrate:fresh': cmdMigrateFresh,
+    'migrate:status': cmdMigrateStatus,
+    'db:seed': cmdDbSeed,
+    'db:wipe': cmdDbWipe,
+    'generate:graphql': ctx => cmdGenerate({ ...ctx, subcommand: 'graphql' }),
+    'generate:types': ctx => cmdGenerate({ ...ctx, subcommand: 'types' }),
+    'generate:openapi': ctx => cmdGenerate({ ...ctx, subcommand: 'openapi' }),
 }
 
-// Resolve project root (where eloquent.config.js lives, or cwd)
-const cwd = process.cwd()
-const configPath = resolve(cwd, 'eloquent.config.js')
-const config = existsSync(configPath)
-    ? (await import(pathToFileURL(configPath).href)).default
-    : null
+export function version() {
+    // Read from the CLI's own package.json so it never drifts from the release.
+    return JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version
+}
 
-const ctx = { cwd, config, flags, positional }
+export function banner() {
+    const width = 30
+    const titleLine = `  EloquentJS CLI  v${version()}`.padEnd(width)
+    const bar = '═'.repeat(width)
+    return `${colors.cyan}╔${bar}╗\n║${titleLine}║\n╚${bar}╝${colors.reset}`
+}
 
-try {
-    switch (command) {
-        case 'init':
-            await cmdInit(ctx)
-            break
+/**
+ * Run one CLI invocation.
+ *
+ * This module is the package entry point AND the CLI implementation, so it must
+ * not execute or call process.exit() at import time — `import '@eloquentjs/cli'`
+ * used to parse argv, run a command and terminate the host process. bin/eloquent.js
+ * calls this and maps the return value to an exit code.
+ *
+ * @param {string[]} [args] defaults to process.argv.slice(2)
+ * @param {{cwd?: string, silent?: boolean}} [opts]
+ * @returns {Promise<number>} the process exit code
+ */
+export async function run(args = process.argv.slice(2), { cwd = process.cwd(), silent = false } = {}) {
+    const { command, flags, positional } = parseArgs(args)
+    const log = silent ? () => { } : console.log
 
-        case 'make:model':
-            await cmdMakeModel(ctx)
-            break
-
-        case 'make:migration':
-            await cmdMakeMigration(ctx)
-            break
-
-        case 'make:seeder':
-            await cmdMakeSeeder(ctx)
-            break
-
-        case 'make:factory':
-            await cmdMakeFactory(ctx)
-            break
-
-        case 'migrate':
-            await cmdMigrate(ctx)
-            break
-
-        case 'migrate:rollback':
-            await cmdMigrateRollback(ctx)
-            break
-
-        case 'migrate:reset':
-            await cmdMigrateReset(ctx)
-            break
-
-        case 'migrate:refresh':
-            await cmdMigrateRefresh(ctx)
-            break
-
-        case 'migrate:fresh':
-            await cmdMigrateFresh(ctx)
-            break
-
-        case 'migrate:status':
-            await cmdMigrateStatus(ctx)
-            break
-
-        case 'db:seed':
-            await cmdDbSeed(ctx)
-            break
-
-        case 'db:wipe':
-            await cmdDbWipe(ctx)
-            break
-
-        case 'generate:graphql':
-            await cmdGenerate({ ...ctx, subcommand: 'graphql' })
-            break
-
-        case 'generate:types':
-            await cmdGenerate({ ...ctx, subcommand: 'types' })
-            break
-
-        case 'generate:openapi':
-            await cmdGenerate({ ...ctx, subcommand: 'openapi' })
-            break
-
-        default:
-            console.error(`${colors.red}✖ Unknown command: ${command}${colors.reset}`)
-            console.log(`Run ${colors.cyan}eloquent list${colors.reset} to see available commands.`)
-            exit(1)
+    // `--version` arrives as a flag, not a command, so it is checked first.
+    if (flags.version || flags.V) {
+        log(version())
+        return 0
     }
-} catch (err) {
-    console.error(`\n${colors.red}✖ Error: ${err.message}${colors.reset}`)
-    if (flags.verbose || flags.v) console.error(err.stack)
-    exit(1)
+
+    if (!command || command === 'list' || flags.help || flags.h) {
+        log(banner())
+        await cmdList()
+        return 0
+    }
+
+    // Resolve project root (where eloquent.config.js lives, or cwd)
+    const configPath = resolve(cwd, 'eloquent.config.js')
+    const config = existsSync(configPath)
+        ? (await import(pathToFileURL(configPath).href)).default
+        : null
+
+    const ctx = { cwd, config, flags, positional }
+    const handler = COMMANDS[command]
+
+    if (!handler) {
+        console.error(`${colors.red}✖ Unknown command: ${command}${colors.reset}`)
+        log(`Run ${colors.cyan}eloquent list${colors.reset} to see available commands.`)
+        return 1
+    }
+
+    try {
+        await handler(ctx)
+        return 0
+    } catch (err) {
+        console.error(`
+${colors.red}✖ Error: ${err.message}${colors.reset}`)
+        if (flags.verbose || flags.v) console.error(err.stack)
+        return 1
+    }
 }
+
+export { COMMANDS }

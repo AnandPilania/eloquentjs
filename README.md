@@ -12,7 +12,7 @@ const users = await User
   .paginate(1, 20)
 ```
 
-[![Tests](https://img.shields.io/badge/tests-989%20passing-brightgreen)](#)
+[![Tests](https://img.shields.io/badge/tests-1146%20passing-brightgreen)](#)
 [![License](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D20.6.0-brightgreen)](#)
 [![MCP](https://img.shields.io/badge/MCP-compatible-purple)](#)
@@ -94,7 +94,18 @@ class User extends Model {
 await User.where('active', true).with('posts').orderBy('name').paginate(1, 20)
 await User.whereIn('role', ['admin', 'editor']).get()
 await User.whereBetween('age', [18, 65]).count()
-await User.active().admins().latest().first()
+await User.scope('active').latest().first()
+
+// Relationship queries
+await User.whereHas('posts', qb => qb.where('published', true)).get()
+const users = await User.withCount('posts').get()   // users[0].posts_count
+
+// Transactions — model writes inside participate, on every driver
+import { DB } from '@eloquentjs/core'
+await DB.transaction(async () => {
+  const user = await User.create({ name: 'Alice' })
+  await user.profile().create({ bio: 'Hello' })
+})   // a throw here rolls all of it back
 
 // Global mass-assignment bypass
 Model.unguard()
@@ -137,11 +148,20 @@ router.post('/users', expressValidate(schema, { async: true }), handler)
 await User.with('posts.comments.author').get()
 await User.with({ posts: qb => qb.where('published', true) }).get()
 
+// A relation is a query builder — every method constrains the DB query
+await user.posts().where('published', true).latest().limit(5).get()
+await user.posts().paginate(1, 20)
+
 // BelongsToMany pivot
 await user.roles().attach(roleId, { assigned_at: new Date() })
 await user.roles().sync([1, 2, 3])
+const roles = await user.roles().withPivot('assigned_at').get()
+roles[0].pivot.assigned_at
 
-// Polymorphic
+// Polymorphic — register aliases so a class rename can't orphan existing rows
+import { ModelRegistry } from '@eloquentjs/core'
+ModelRegistry.morphMap({ post: Post, video: Video })
+
 class Comment extends Model {
   commentable() { return this.morphTo('commentable') }
 }
@@ -151,12 +171,21 @@ class Comment extends Model {
 
 ```js
 class UserObserver {
-  creating(user) { user.uuid = crypto.randomUUID() }
-  created(user)  { WelcomeEmail.send(user) }
-  deleting(user) { user.posts().delete() }
+  retrieved(user) { }
+  saving(user)    { }                                   // insert and update
+  creating(user)  { user.uuid = crypto.randomUUID() }
+  created(user)   { WelcomeEmail.send(user) }
+  updating(user)  { if (user.locked) return false }     // false cancels the save
+  deleting(user)  { user.posts().delete() }
 }
-HookRegistry.observe(User, new UserObserver())
+User.observe(new UserObserver())
+
+// Or a single hook; the return value unregisters it
+const off = User.on('created', user => audit(user))
 ```
+
+Registration is keyed on the class reference, so two `User` classes from
+different modules don't collide and a minifier can't break it.
 
 ### Realtime
 
@@ -261,14 +290,14 @@ eloquentjs/
 │   ├── mcp/           @eloquentjs/mcp
 │   └── cli/           @eloquentjs/cli
 ├── tests/
-│   └── unit/          989 tests, 18 suites, all passing
+│   └── unit/          1146 tests, 22 suites, all passing
 ├── agent-files/       CLAUDE.md, .cursorrules, skills/...
 ├── .github/
 │   └── workflows/     CI + Release automation
 ├── scripts/
 │   ├── release.js     Version bump + changelog
 │   ├── publish.js     npm publish orchestration
-│   ├── lint.js        Syntax check (node --check)
+│   ├── lint.js        Parse check (node --check), run after ESLint
 │   └── check-versions.js  Version consistency check
 └── CHANGELOG.md
 ```
@@ -281,9 +310,12 @@ eloquentjs/
 git clone https://github.com/your-org/eloquentjs.git
 cd eloquentjs && npm install
 
-npm test                                           # run all 989 tests
-npm run lint                                       # syntax-check every source file
-npm run test:coverage                              # with coverage report
+npm test                                           # run all 1146 tests
+npm run lint                                       # ESLint, then a per-file parse check
+npm run lint:fix                                   # auto-fix what ESLint can
+npm run typecheck                                  # tsc: JSDoc -> .d.ts, fails on type errors
+npm run check                                      # lint + typecheck + tests
+npm run test:coverage                              # coverage, with a floor CI enforces
 npm test -- --testPathPattern=MCP                  # single suite
 npm run check:versions                             # verify all packages at same version
 ```

@@ -1,4 +1,4 @@
-import { colors, info } from '../utils.js'
+import { colors } from '../utils.js'
 import { resetMigrations, runMigrations } from './migration-runner.js'
 
 export async function cmdMigrateRefresh(ctx) {
@@ -9,7 +9,7 @@ export async function cmdMigrateRefresh(ctx) {
     console.log()
   }
 
-  const { ran, batch } = await runMigrations(ctx)
+  const { ran } = await runMigrations(ctx)
 
   console.log(`\n${colors.green}✔${colors.reset}  Refreshed: rolled back ${rolledBack}, ran ${ran} migration${ran !== 1 ? 's' : ''}.`)
 

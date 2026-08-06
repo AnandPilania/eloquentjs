@@ -9,8 +9,15 @@
     "target": "ES2022",
     "lib": ["ES2022"],
     "skipLibCheck": true,
-    "noEmitOnError": false,
+    // Do not publish declarations generated from JSDoc that does not
+    // type-check: with noEmitOnError off, `npm run build` wrote .d.ts files
+    // alongside its own errors, so "TypeScript support" was nominal.
+    "noEmitOnError": true,
     "strict": false,
+    // The parts of strict mode that catch real bugs in JSDoc-typed JS without
+    // demanding annotations everywhere. Full `strict` is the next step.
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
     "types": ["node"],
     "esModuleInterop": true,
     "resolveJsonModule": true

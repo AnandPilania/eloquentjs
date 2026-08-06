@@ -155,13 +155,71 @@ describe('introspect — live Model class', () => {
     expect(schema.primaryKey).toBe('id')
   })
 
-  test('includes id field with ID type', () => {
+  test('includes id field with ID type, typed from keyType', () => {
+    // The PK used to be hard-coded as a uuid string even for integer keys.
     const idField = schema.fields.find(f => f.isPk)
     expect(idField).toBeDefined()
     expect(idField.name).toBe('id')
     expect(idField.gqlType).toBe('ID')
-    expect(idField.tsType).toBe('string')
+    expect(idField.tsType).toBe('number')
     expect(idField.fillable).toBe(false)
+  })
+
+  test('a uuid keyType produces a string id', () => {
+    class UuidModel {
+      static table = 'things'
+      static keyType = 'uuid'
+      static timestamps = false
+    }
+    const pkField = introspect(UuidModel).fields.find(f => f.isPk)
+    expect(pkField.tsType).toBe('string')
+  })
+
+  test('fillable columns appear even with no casts declared', () => {
+    // Deriving fields from `casts` alone produced a type with only
+    // id/created_at/updated_at, hiding every real column.
+    class Bare {
+      static table = 'bares'
+      static fillable = ['name', 'email']
+      static timestamps = false
+    }
+    const names = introspect(Bare).fields.map(f => f.name)
+    expect(names).toEqual(expect.arrayContaining(['id', 'name', 'email']))
+  })
+
+  test('graphql.fields does not un-hide `hidden` columns', () => {
+    class Secretive {
+      static table = 'secretives'
+      static fillable = ['name']
+      static hidden = ['password']
+      static timestamps = false
+      static graphql = { fields: { internal_note: false } }
+    }
+    const gqlHidden = introspect(Secretive).graphql.hidden
+    expect(gqlHidden.has('password')).toBe(true)
+    expect(gqlHidden.has('internal_note')).toBe(true)
+  })
+
+  test('a class-based cast does not throw', () => {
+    class JsonBlob { get(v) { return v } set(v) { return v } }
+    class WithClassCast {
+      static table = 'blobs'
+      static casts = { meta: JsonBlob }
+      static timestamps = false
+    }
+    expect(() => introspect(WithClassCast)).not.toThrow()
+    expect(introspect(WithClassCast).fields.find(f => f.name === 'meta')).toBeDefined()
+  })
+
+  test('static relations is preferred over source scraping', () => {
+    class Declared {
+      static table = 'declareds'
+      static timestamps = false
+      static relations = { posts: { type: 'hasMany', related: 'Post' } }
+    }
+    const rels = introspect(Declared).relations
+    expect(rels).toHaveLength(1)
+    expect(rels[0]).toMatchObject({ name: 'posts', type: 'hasMany', related: 'Post', isList: true })
   })
 
   test('maps boolean cast correctly', () => {
@@ -487,10 +545,14 @@ describe('generateTypeScriptTypes', () => {
     expect(ts).toContain('export interface User {')
   })
 
-  test('id field is string', () => {
+  test('id field type follows keyType', () => {
+    // Was hard-coded to string even for an integer primary key.
     const ts = generateTypeScriptTypes(userSchema)
     expect(ts).toContain('id')
-    expect(ts).toMatch(/id\??:\s*string/)
+    expect(ts).toMatch(/id\??:\s*number/)
+
+    const uuidSchema = introspect(class Thing { static keyType = 'uuid'; static timestamps = false })
+    expect(generateTypeScriptTypes(uuidSchema)).toMatch(/id\??:\s*string/)
   })
 
   test('boolean cast → boolean type', () => {

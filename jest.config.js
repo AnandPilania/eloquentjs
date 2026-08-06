@@ -27,4 +27,14 @@ export default {
   },
   testMatch: ['**/tests/**/*.test.js'],
   collectCoverageFrom: ['packages/*/src/**/*.js'],
+  // A floor just under the current numbers, so coverage can only go up. Raise
+  // these as suites are added; do not lower them to make a build pass.
+  coverageThreshold: {
+    global: {
+      statements: 54,
+      branches: 47,
+      functions: 52,
+      lines: 57,
+    },
+  },
 }

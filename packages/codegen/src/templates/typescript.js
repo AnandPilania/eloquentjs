@@ -20,17 +20,18 @@ export function generateTypeScriptTypes(schema, opts = {}) {
     strict              = true,
   } = opts
 
-  const { name, fields, relations, softDeletes } = schema
-  const q = strict ? '' : '?'   // strict: all non-null fields required; loose: everything optional
+  const { name, fields, relations } = schema
 
   const lines = []
 
   // ── Main interface ────────────────────────────────────────────────────────
   lines.push(`export interface ${name} {`)
   for (const f of fields) {
-    const optional = f.nullable || f.isTimestamp || f.isSoftDelete ? '?' : ''
-    const tsType   = f.isPk ? 'string' : f.tsType
-    lines.push(`  ${f.name}${optional}: ${tsType}`)
+    // `strict: false` marks every property optional; otherwise only nullable
+    // columns and the auto-managed timestamp columns are.
+    const optional = !strict || f.nullable || f.isTimestamp || f.isSoftDelete ? '?' : ''
+    // The PK's type comes from introspection (keyType), not a hard-coded string.
+    lines.push(`  ${f.name}${optional}: ${f.tsType}`)
   }
 
   if (includeRelations) {
@@ -82,7 +83,7 @@ export function generateTypeScriptTypes(schema, opts = {}) {
  * @returns {string}
  */
 export function generateTypeScriptFile(schemas, opts = {}) {
-  const { header = true, moduleFormat = 'esm' } = opts
+  const { header = true } = opts
   const lines = []
 
   if (header) {

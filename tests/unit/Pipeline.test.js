@@ -3,8 +3,7 @@
  */
 
 import { Pipeline } from '../../packages/core/src/Pipeline.js'
-import { Factory }  from '../../packages/core/src/Factory.js'
-import { Seeder }   from '../../packages/core/src/Factory.js'
+import { Factory, Seeder } from '../../packages/core/src/Factory.js'
 import { Model }    from '../../packages/core/src/Model.js'
 import { setResolver, clearResolvers } from '../../packages/core/src/ConnectionRegistry.js'
 

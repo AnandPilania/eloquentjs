@@ -579,12 +579,15 @@ describe('pluck() and value()', () => {
     expect(names).toEqual(['Alice', 'Bob'])
   })
 
-  test('pluck(value, key) returns keyed object', async () => {
+  test('pluck(value, key) returns a Map, preserving key types', async () => {
+    // A Map rather than a plain object: object keys coerce to strings, and a
+    // key of '__proto__' would mis-key. Matches Collection.pluck().
     const rowResolver = makeCapturingResolver([{ id: 1, name: 'Alice' }, { id: 2, name: 'Bob' }])
     setResolver(rowResolver)
 
     const map = await User.pluck('name', 'id')
-    expect(map).toEqual({ 1: 'Alice', 2: 'Bob' })
+    expect(map.get(1)).toBe('Alice')
+    expect(map.get(2)).toBe('Bob')
   })
 
   test('value() returns single column from first row', async () => {

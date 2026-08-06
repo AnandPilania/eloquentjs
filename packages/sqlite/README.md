@@ -56,16 +56,27 @@ await disconnect() // disconnect all
 ## Transactions
 
 ```js
-import { transaction } from '@eloquentjs/sqlite'
+import { DB } from '@eloquentjs/core'
 
-await transaction(async () => {
+// Model writes inside run on the transaction; a throw rolls all of them back.
+await DB.transaction(async () => {
   const user = await User.create({ name: 'Alice' })
   await user.profile().create({ bio: 'Hello' })
-  // Any thrown error -> automatic rollback
 })
 
+// The driver export is equivalent
+import { transaction } from '@eloquentjs/sqlite'
 await transaction(callback, 'primary')
 ```
+
+Nested calls become `SAVEPOINT`s, so an inner failure rolls back only its own
+work.
+
+> **SQLite has one connection.** Anything else running on the same connection
+> while a transaction is open — a query from a concurrent request, say — is
+> inside that transaction and will be rolled back with it. That is a property of
+> the database, not of this driver: use one connection per process and do not
+> interleave unrelated work across an `await` inside the callback.
 
 ---
 

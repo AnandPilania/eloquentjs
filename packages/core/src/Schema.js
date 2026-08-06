@@ -3,6 +3,17 @@
  */
 import { getResolver } from './ConnectionRegistry.js'
 
+/**
+ * Portable default expressions. Core must not emit driver SQL — each driver
+ * renders these markers itself (pgsql: gen_random_uuid(); sqlite: randomblob).
+ * Use them via `.default(Expr.uuid)` or the shorthands below.
+ */
+export const Expr = {
+  uuid: { expr: 'uuid' },
+  now: { expr: 'now' },
+  today: { expr: 'today' },
+}
+
 // ─── Blueprint ───────────────────────────────────────────────────────────────
 export class Blueprint {
   constructor(table, mode = 'create') {
@@ -13,11 +24,13 @@ export class Blueprint {
     this.foreigns  = []
     this.drops     = []
     this.renames   = []
+    /** Columns redefined via ->change(); drivers ALTER rather than ADD these. */
+    this.changes   = []
   }
 
   // ─── Primary key ──────────────────────────────────────────────────────────
   id(column = 'id')        { return this._col({ name: column, type: 'bigIncrements', primaryKey: true }) }
-  uuid(column = 'id')      { return this._col({ name: column, type: 'uuid',          primaryKey: true }).default('gen_random_uuid()') }
+  uuid(column = 'id')      { return this._col({ name: column, type: 'uuid',          primaryKey: true }).default(Expr.uuid) }
   bigIncrements(col)       { return this._col({ name: col, type: 'bigIncrements', primaryKey: true }) }
   increments(col)          { return this._col({ name: col, type: 'increments',    primaryKey: true }) }
 
@@ -25,16 +38,17 @@ export class Blueprint {
   string(col, len = 255)   { return this._col({ name: col, type: 'string',   length: len }) }
   char(col, len = 1)       { return this._col({ name: col, type: 'char',     length: len }) }
   text(col)                { return this._col({ name: col, type: 'text' }) }
-  longText(col)            { return this._col({ name: col, type: 'text' }) }
-  tinyText(col)            { return this._col({ name: col, type: 'text' }) }
+  mediumText(col)          { return this._col({ name: col, type: 'mediumText' }) }
+  longText(col)            { return this._col({ name: col, type: 'longText' }) }
+  tinyText(col)            { return this._col({ name: col, type: 'tinyText' }) }
 
   // ─── Numeric ──────────────────────────────────────────────────────────────
   integer(col)             { return this._col({ name: col, type: 'integer' }) }
   bigInteger(col)          { return this._col({ name: col, type: 'bigInteger' }) }
   smallInteger(col)        { return this._col({ name: col, type: 'smallInteger' }) }
   tinyInteger(col)         { return this._col({ name: col, type: 'tinyInteger' }) }
-  unsignedInteger(col)     { return this._col({ name: col, type: 'integer',    unsigned: true }) }
-  unsignedBigInteger(col)  { return this._col({ name: col, type: 'bigInteger', unsigned: true }) }
+  unsignedInteger(col)     { return this._col({ name: col, type: 'integer',    _unsigned: true }) }
+  unsignedBigInteger(col)  { return this._col({ name: col, type: 'bigInteger', _unsigned: true }) }
   float(col)               { return this._col({ name: col, type: 'float' }) }
   double(col)              { return this._col({ name: col, type: 'double' }) }
   decimal(col, p = 8, s = 2) { return this._col({ name: col, type: 'decimal', precision: p, scale: s }) }
@@ -89,42 +103,58 @@ export class Blueprint {
 
   // ─── Foreign key shorthand ────────────────────────────────────────────────
   foreignId(col) {
-    const colDef = this._col({ name: col, type: 'bigInteger', unsigned: true })
+    const colDef = this._col({ name: col, type: 'bigInteger', _unsigned: true })
+
+    // The referential actions are recorded on the column and copied onto the
+    // constraint by constrained(), so `.cascadeOnDelete().constrained('roles')`
+    // works in either order — it used to silently do nothing before constrained().
+    const pending = { onDelete: 'RESTRICT', onUpdate: 'CASCADE' }
+    const setAction = (key, action) => {
+      pending[key] = action
+      const f = this.foreigns.find(f => f.column === col && !f.drop)
+      if (f) f[key] = action
+      return colDef
+    }
 
     colDef.constrained = (table, references = 'id') => {
-      this.foreigns.push({
-        column: col, table, references,
-        onDelete: 'RESTRICT', onUpdate: 'CASCADE',
-      })
+      this.foreigns.push({ column: col, table, references, ...pending })
       return colDef
     }
-    colDef.cascadeOnDelete = () => {
-      const f = this.foreigns.find(f => f.column === col)
-      if (f) f.onDelete = 'CASCADE'
-      return colDef
+    colDef.references = (references) => {
+      colDef._references = references
+      return {
+        on: (table) => {
+          this.foreigns.push({ column: col, table, references, ...pending })
+          return colDef
+        },
+      }
     }
-    colDef.nullOnDelete = () => {
-      const f = this.foreigns.find(f => f.column === col)
-      if (f) f.onDelete = 'SET NULL'
-      return colDef
-    }
-    colDef.restrictOnDelete = () => {
-      const f = this.foreigns.find(f => f.column === col)
-      if (f) f.onDelete = 'RESTRICT'
-      return colDef
-    }
+    colDef.cascadeOnDelete = () => setAction('onDelete', 'CASCADE')
+    colDef.nullOnDelete = () => setAction('onDelete', 'SET NULL')
+    colDef.restrictOnDelete = () => setAction('onDelete', 'RESTRICT')
+    colDef.cascadeOnUpdate = () => setAction('onUpdate', 'CASCADE')
+    colDef.restrictOnUpdate = () => setAction('onUpdate', 'RESTRICT')
+    return colDef
+  }
+
+  foreignUuid(col) {
+    const colDef = this.foreignId(col)
+    colDef.type = 'uuid'
+    colDef._unsigned = false
     return colDef
   }
 
   foreign(col) {
     const def = { column: col }
+    const blueprint = this
     const chain = {
-      references(c)  { def.references = c; return chain },
-      on(table)      { def.table = table; this._blueprint.foreigns.push(def); return chain },
-      onDelete(a)    { def.onDelete = a.toUpperCase(); return chain },
-      onUpdate(a)    { def.onUpdate = a.toUpperCase(); return chain },
+      references(c) { def.references = c; return chain },
+      on(table) { def.table = table; blueprint.foreigns.push(def); return chain },
+      onDelete(a) { def.onDelete = a.toUpperCase(); return chain },
+      onUpdate(a) { def.onUpdate = a.toUpperCase(); return chain },
+      cascadeOnDelete() { def.onDelete = 'CASCADE'; return chain },
+      nullOnDelete() { def.onDelete = 'SET NULL'; return chain },
     }
-    chain._blueprint = this
     return chain
   }
 
@@ -149,21 +179,39 @@ export class Blueprint {
    * @returns {any} a plain column-def object plus chainable modifiers (nullable(), default(), ...)
    */
   _col(def) {
+    const blueprint = this
+    // Every flag is _-prefixed so a `def` key can never overwrite a modifier
+    // method — `unsignedInteger('x').unsigned()` used to throw because
+    // `unsigned: true` from the def clobbered the unsigned() function.
     const col = Object.assign(/** @type {any} */ ({
       _nullable: false,
       _default:  undefined,
       _unique:   false,
+      _unsigned: false,
       _after:    null,
       _comment:  null,
       // Chainable modifiers:
-      nullable()      { this._nullable = true; return this },
+      nullable(value = true) { this._nullable = value; return this },
       default(val)    { this._default = val; return this },
-      unique()        { this._unique = true; return this },
+      // A named table-level index rather than an inline UNIQUE, so it can be
+      // dropped later by dropUnique() and matches Laravel's naming.
+      unique(name)    { blueprint.unique(this.name, name); return this },
       after(col)      { this._after = col; return this },
       comment(text)   { this._comment = text; return this },
-      unsigned()      { this.unsigned = true; return this },
-      useCurrent()    { this._default = 'CURRENT_TIMESTAMP'; return this },
-      index()         { /* handled at table level */ return this },
+      unsigned()      { this._unsigned = true; return this },
+      useCurrent()    { this._default = Expr.now; return this },
+      /** Register a real single-column index (used to be a no-op). */
+      index(name)     { blueprint.index(this.name, name); return this },
+      /**
+       * Redefine an existing column instead of adding it.
+       *   Schema.table('users', t => t.string('name', 500).change())
+       */
+      change() {
+        const at = blueprint.columns.indexOf(this)
+        if (at !== -1) blueprint.columns.splice(at, 1)
+        blueprint.changes.push(this)
+        return this
+      },
     }), def)
 
     this.columns.push(col)
@@ -185,12 +233,19 @@ export const Schema = {
     return getResolver(connection).alterTable(table, bp)
   },
 
-  async drop(table, connection = 'default') {
-    return getResolver(connection).dropTable(table)
+  /**
+   * @param {{cascade?: boolean}|string} [opts] cascade is opt-in — see
+   * PgResolver.dropTable. A string is accepted as the connection name for
+   * backwards compatibility.
+   */
+  async drop(table, opts = {}, connection = 'default') {
+    const [o, c] = typeof opts === 'string' ? [{}, opts] : [opts, connection]
+    return getResolver(c).dropTable(table, o)
   },
 
-  async dropIfExists(table, connection = 'default') {
-    return getResolver(connection).dropTable(table, { ifExists: true })
+  async dropIfExists(table, opts = {}, connection = 'default') {
+    const [o, c] = typeof opts === 'string' ? [{}, opts] : [opts, connection]
+    return getResolver(c).dropTable(table, { ...o, ifExists: true })
   },
 
   async rename(from, to, connection = 'default') {

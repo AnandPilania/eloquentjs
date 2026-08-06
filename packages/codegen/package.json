@@ -32,7 +32,7 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "@eloquentjs/core": "^0.0.7"
+    "@eloquentjs/core": ">=0.0.7 <0.1.0"
   },
   "author": {
     "name": "Anand Pilania",
@@ -40,7 +40,8 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/AnandPilania/eloquentjs.git"
+    "url": "git+https://github.com/AnandPilania/eloquentjs.git",
+    "directory": "packages/codegen"
   },
   "bugs": {
     "url": "https://github.com/AnandPilania/eloquentjs/issues"
@@ -56,6 +57,7 @@
   ],
   "types": "dist-types/index.d.ts",
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json",
+    "prepublishOnly": "npm run build"
   }
 }

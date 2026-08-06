@@ -10,12 +10,13 @@
       "default": "./src/index.js"
     },
     "./client": {
-      "types": "./dist-types/index.d.ts",
-      "default": "./src/index.js"
+      "types": "./dist-types/client.d.ts",
+      "browser": "./src/client.js",
+      "default": "./src/client.js"
     }
   },
   "dependencies": {
-    "@eloquentjs/core": "^0.0.7",
+    "@eloquentjs/core": ">=0.0.7 <0.1.0",
     "ws": "^8.19.0"
   },
   "license": "MIT",
@@ -25,7 +26,8 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/AnandPilania/eloquentjs.git"
+    "url": "git+https://github.com/AnandPilania/eloquentjs.git",
+    "directory": "packages/realtime"
   },
   "bugs": {
     "url": "https://github.com/AnandPilania/eloquentjs/issues"
@@ -41,6 +43,7 @@
   ],
   "types": "dist-types/index.d.ts",
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json",
+    "prepublishOnly": "npm run build"
   }
 }

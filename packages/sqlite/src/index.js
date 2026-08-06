@@ -6,7 +6,10 @@
  * remains async so it matches the PostgreSQL and MongoDB drivers.
  */
 
-import { setResolver } from '@eloquentjs/core'
+import {
+  setResolver, getResolver, runInTransaction,
+  indexName, foreignKeyName, assertOperator,
+} from '@eloquentjs/core'
 
 // ─── Per-connection database registry ────────────────────────────────────────
 const _dbs = new Map()
@@ -32,7 +35,7 @@ export async function connect(config = {}, connectionName = 'default') {
 
   _dbs.set(connectionName, db)
 
-  const resolver = new SQLiteResolver(db)
+  const resolver = new SQLiteResolver(db, connectionName)
   setResolver(resolver, connectionName)
   return resolver
 }
@@ -78,25 +81,49 @@ export async function raw(sql, params = [], connectionName = 'default') {
   return isReader(stmt, sql) ? stmt.all(...params) : stmt.run(...params)
 }
 
-/** Run a function inside a BEGIN/COMMIT transaction. Rolls back on throw. */
+/**
+ * Run a function inside a BEGIN/COMMIT transaction. Rolls back on throw.
+ * Delegates to the resolver so model writes inside participate — see
+ * SQLiteResolver.transaction().
+ */
 export async function transaction(callback, connectionName = 'default') {
-  const db = _getDb(connectionName)
-  db.prepare('BEGIN').run()
-
-  try {
-    const result = await callback(new TransactionClient(db))
-    db.prepare('COMMIT').run()
-    return result
-  } catch (err) {
-    db.prepare('ROLLBACK').run()
-    throw err
-  }
+  return getResolver(connectionName).transaction(callback)
 }
 
 // ─── SQLiteResolver ─────────────────────────────────────────────────────────
 export class SQLiteResolver {
-  constructor(db) {
+  constructor(db, connectionName = 'default') {
     this.db = db
+    this.connectionName = connectionName
+    this._txDepth = 0
+  }
+
+  // ── TRANSACTIONS ───────────────────────────────────────────────────────────
+  /**
+   * SQLite has a single connection, so the "isolation" here is the async scope:
+   * publishing a resolver via runInTransaction() is what makes model writes
+   * inside the callback part of this transaction and, just as importantly,
+   * documents that concurrent work on the same connection is NOT isolated.
+   * Nested calls become SAVEPOINTs.
+   * @template T
+   * @param {(tx: SQLiteResolver) => Promise<T>} fn
+   * @returns {Promise<T>}
+   */
+  async transaction(fn) {
+    const depth = this._txDepth
+    const scoped = new SQLiteResolver(this.db, this.connectionName)
+    scoped._txDepth = depth + 1
+    const sp = `eloquent_sp_${depth}`
+
+    execSql(this.db, depth === 0 ? 'BEGIN' : `SAVEPOINT ${sp}`)
+    try {
+      const result = await runInTransaction(this.connectionName, scoped, () => fn(scoped))
+      execSql(this.db, depth === 0 ? 'COMMIT' : `RELEASE SAVEPOINT ${sp}`)
+      return result
+    } catch (err) {
+      try { execSql(this.db, depth === 0 ? 'ROLLBACK' : `ROLLBACK TO SAVEPOINT ${sp}`) } catch { }
+      throw err
+    }
   }
 
   async raw(sql, params = []) {
@@ -121,8 +148,11 @@ export class SQLiteResolver {
     const vals = entries.map(() => '?').join(', ')
     const params = entries.map(([, v]) => prepareValue(v))
 
-    const result = this.db.prepare(`INSERT INTO ${quoteIdent(table)} (${cols}) VALUES (${vals})`).run(...params)
-    return this.db.prepare(`SELECT * FROM ${quoteIdent(table)} WHERE rowid = ?`).get(result.lastInsertRowid)
+    // RETURNING keeps this consistent with insertMany() and works on tables
+    // WITHOUT ROWID, where the old `WHERE rowid = ?` lookup returned nothing.
+    return this.db
+      .prepare(`INSERT INTO ${quoteIdent(table)} (${cols}) VALUES (${vals}) RETURNING *`)
+      .get(...params)
   }
 
   /**
@@ -193,15 +223,31 @@ export class SQLiteResolver {
   // ── AGGREGATE ──────────────────────────────────────────────────────────────
   async aggregate(table, fn, column, ctx) {
     const col = column === '*' ? '*' : quoteIdent(column)
+    const expr = `${fn.toUpperCase()}(${col})`
     const aggCtx = {
       ...ctx,
-      selects: [{ raw: `${fn.toUpperCase()}(${col}) AS _agg` }],
+      selects: [{ raw: `${expr} AS _agg` }],
       orderBys: [],
       limit: null,
       offset: null,
     }
 
-    const { sql, params } = buildSelect(table, aggCtx)
+    let sql, params
+    if (aggCtx.groupBys?.length) {
+      // A grouped aggregate returns a row per group; .get() would report only
+      // the first one. Aggregate over the grouped result instead.
+      const inner = buildSelect(table, {
+        ...aggCtx,
+        selects: fn === 'count'
+          ? aggCtx.groupBys.map(c => ({ raw: quoteIdent(c) }))
+          : [...aggCtx.groupBys.map(c => ({ raw: quoteIdent(c) })), { raw: `${expr} AS _g` }],
+      })
+      const outer = fn === 'count' ? 'COUNT(*)' : `${fn.toUpperCase()}(_g)`
+      sql = `SELECT ${outer} AS _agg FROM (${inner.sql}) AS _grouped`
+      params = inner.params
+    } else {
+      ({ sql, params } = buildSelect(table, aggCtx))
+    }
     const raw = this.db.prepare(sql).get(...params)?._agg
     return raw == null ? (fn === 'count' ? 0 : null) : Number(raw)
   }
@@ -352,8 +398,13 @@ export class SQLiteResolver {
     const tempTable = `__eloquent_tmp_${table}_${Date.now()}`
     const columnsToCopy = nextSchema.columns.filter(col => col.copyFrom)
 
-    execSql(this.db, 'PRAGMA foreign_keys = OFF')
-    this.db.prepare('BEGIN').run()
+    // PRAGMA foreign_keys is a no-op inside a transaction, so a rebuild nested
+    // in one cannot defer FK checks; run it in the caller's transaction instead.
+    const ownTx = this._txDepth === 0
+    if (ownTx) {
+      execSql(this.db, 'PRAGMA foreign_keys = OFF')
+      execSql(this.db, 'BEGIN')
+    }
 
     try {
       this.db.prepare(buildCreateTableSQL(tempTable, nextSchema.columns, nextSchema.foreigns, nextSchema.indexes)).run()
@@ -369,12 +420,12 @@ export class SQLiteResolver {
       const violations = this.db.prepare('PRAGMA foreign_key_check').all()
       if (violations.length) throw new Error(`[EloquentJS/sqlite] Foreign key check failed after rebuilding ${table}`)
 
-      this.db.prepare('COMMIT').run()
+      if (ownTx) execSql(this.db, 'COMMIT')
     } catch (err) {
-      this.db.prepare('ROLLBACK').run()
+      if (ownTx) { try { execSql(this.db, 'ROLLBACK') } catch { } }
       throw err
     } finally {
-      execSql(this.db, 'PRAGMA foreign_keys = ON')
+      if (ownTx) execSql(this.db, 'PRAGMA foreign_keys = ON')
     }
   }
 
@@ -396,7 +447,7 @@ export class SQLiteResolver {
   async _createIndex(table, idx) {
     if (idx.type !== 'unique' && idx.type !== 'index') return
 
-    const name = idx.name ?? `${table}_${idx.columns.join('_')}_${idx.type}`
+    const name = idx.name ?? indexName(table, idx)
     const cols = idx.columns.map(quoteIdent).join(', ')
     const unique = idx.type === 'unique' ? 'UNIQUE ' : ''
     await this.db.prepare(`CREATE ${unique}INDEX IF NOT EXISTS ${quoteIdent(name)} ON ${quoteIdent(table)} (${cols})`).run()
@@ -407,7 +458,10 @@ export class SQLiteResolver {
 function quoteIdent(name) {
   if (!name || name === '*') return name
   if (name.startsWith('"') && name.endsWith('"')) return name
-  if (name.includes('.')) return name.split('.').map(p => `"${p.replace(/"/g, '""')}"`).join('.')
+  // `table.*` must stay a star — quoting it produces "table"."*", a syntax error.
+  if (name.includes('.')) {
+    return name.split('.').map(p => (p === '*' ? '*' : `"${p.replace(/"/g, '""')}"`)).join('.')
+  }
   return `"${name.replace(/"/g, '""')}"`
 }
 
@@ -434,7 +488,7 @@ function buildSelect(table, ctx) {
     if (j.type === 'CROSS') {
       sql += ` CROSS JOIN ${quoteIdent(j.table)}`
     } else {
-      sql += ` ${j.type} JOIN ${quoteIdent(j.table)} ON ${quoteIdent(j.first)} ${j.operator} ${quoteIdent(j.second)}`
+      sql += ` ${j.type} JOIN ${quoteIdent(j.table)} ON ${quoteIdent(j.first)} ${assertOperator(j.operator ?? '=')} ${quoteIdent(j.second)}`
     }
   }
 
@@ -445,15 +499,28 @@ function buildSelect(table, ctx) {
   }
 
   if (ctx.groupBys?.length) {
-    sql += ` GROUP BY ${ctx.groupBys.map(quoteIdent).join(', ')}`
+    sql += ` GROUP BY ${ctx.groupBys.map(g => (g?.raw ? g.raw : quoteIdent(g))).join(', ')}`
   }
 
   const havingParts = []
   for (const h of ctx.havings ?? []) {
-    havingParts.push(`${quoteIdent(h.column)} ${h.operator} ?`)
+    if (h.raw) { havingParts.push(h.raw); continue }
+    const lhs = h.aggregate
+      ? `${h.aggregate.toUpperCase()}(${h.column === '*' ? '*' : quoteIdent(h.column)})`
+      : quoteIdent(h.column)
+    havingParts.push(`${lhs} ${assertOperator(h.operator)} ?`)
     params.push(prepareValue(h.value))
   }
   if (havingParts.length) sql += ` HAVING ${havingParts.join(' AND ')}`
+
+  // A branch's own ORDER BY/LIMIT is meaningless inside a compound SELECT —
+  // only the final result's ordering/limit matters — so union branches are
+  // rendered without them.
+  for (const u of ctx.unions ?? []) {
+    const branch = buildSelect(u.table, { ...u.ctx, unions: [], orderBys: [], limit: null, offset: null })
+    sql += ` UNION ${u.all ? 'ALL ' : ''}${branch.sql}`
+    params.push(...branch.params)
+  }
 
   const orderParts = (ctx.orderBys ?? []).map(o => {
     if (o.raw) return o.raw
@@ -501,8 +568,21 @@ function buildWhereClauses(ctx) {
         clause = `${quoteIdent(w.column)} NOT BETWEEN ${push(w.min)} AND ${push(w.max)}`
         break
       case 'date':
-        clause = `date(${quoteIdent(w.column)}) ${w.operator} ${push(w.value)}`
+        clause = `date(${quoteIdent(w.column)}) ${assertOperator(w.operator ?? '=')} ${push(w.value)}`
         break
+      case 'time':
+        clause = `time(${quoteIdent(w.column)}) ${assertOperator(w.operator ?? '=')} ${push(w.value)}`
+        break
+      case 'column':
+        clause = `${quoteIdent(w.first)} ${assertOperator(w.operator ?? '=')} ${quoteIdent(w.second)}`
+        break
+      case 'exists':
+      case 'notExists': {
+        const sub = buildSelect(w.table, w.ctx)
+        whereParams.push(...sub.params)
+        clause = `${w.type === 'notExists' ? 'NOT ' : ''}EXISTS (${sub.sql})`
+        break
+      }
       case 'year':
         clause = `strftime('%Y', ${quoteIdent(w.column)}) = ${push(String(w.value))}`
         break
@@ -515,15 +595,16 @@ function buildWhereClauses(ctx) {
       case 'jsonContains':
         clause = buildJsonContainsClause(w.column, w.value, push)
         break
-      case 'group': {
+      case 'group':
+      case 'not': {
         const sub = buildWhereClauses({ wheres: w.wheres, rawWheres: w.rawWheres })
         if (!sub.clause) continue
         whereParams.push(...sub.whereParams)
-        clause = `(${sub.clause})`
+        clause = w.type === 'not' ? `NOT (${sub.clause})` : `(${sub.clause})`
         break
       }
       default:
-        clause = `${quoteIdent(w.column)} ${w.operator} ${push(w.value)}`
+        clause = `${quoteIdent(w.column)} ${assertOperator(w.operator)} ${push(w.value)}`
     }
 
     parts.push({ bool, clause })
@@ -570,6 +651,9 @@ const SQLITE_TYPE_MAP = {
   float: 'REAL',
   double: 'REAL',
   text: 'TEXT',
+  tinyText: 'TEXT',
+  mediumText: 'TEXT',
+  longText: 'TEXT',
   boolean: 'INTEGER',
   date: 'TEXT',
   time: 'TEXT',
@@ -638,6 +722,7 @@ function foreignKeyToSQL(fk) {
 
 function requiresTableRebuild(blueprint) {
   if (blueprint.drops.length || blueprint.renames.length || blueprint.foreigns.length) return true
+  if (blueprint.changes?.length) return true   // SQLite cannot ALTER a column type
   if (blueprint.columns.some(col => col.primaryKey || col._unique)) return true
   return blueprint.indexes.some(idx => idx.type === 'dropIndex' || idx.type === 'dropUnique' || idx.type === 'dropPrimary' || idx.type === 'primary')
 }
@@ -698,10 +783,17 @@ function applyBlueprintToSchema(table, currentSchema, blueprint) {
   const renames = new Map(blueprint.renames.map(({ from, to }) => [from, to]))
   const dropPrimary = blueprint.indexes.some(idx => idx.type === 'dropPrimary')
 
+  // ->change() redefinitions replace the inspected definition wholesale.
+  const changed = new Map((blueprint.changes ?? []).map(col => [col.name, col]))
+
   const columns = currentSchema.columns
     .filter(col => !dropColumns.has(col.name))
     .map(col => {
       const name = renames.get(col.name) ?? col.name
+      const redefined = changed.get(col.name) ?? changed.get(name)
+      if (redefined) {
+        return { ...col, name, sql: columnToSQL({ ...redefined, name }), copyFrom: col.name }
+      }
       return {
         ...col,
         name,
@@ -751,7 +843,7 @@ function isForeignKeyDropped(table, fk, foreignOps) {
 }
 
 function generatedForeignKeyName(table, column) {
-  return `${table}_${column}_foreign`
+  return foreignKeyName(table, column)
 }
 
 function isIndexDropped(index, indexOps) {
@@ -763,7 +855,7 @@ function isIndexDropped(index, indexOps) {
 
 function generatedIndexName(index) {
   if (!index.columns?.length) return null
-  return `${index.table}_${index.columns.join('_')}_${index.type}`
+  return indexName(index.table, index)
 }
 
 // ─── Value Helpers ───────────────────────────────────────────────────────────
@@ -774,13 +866,15 @@ function prepareValue(value) {
   return value
 }
 
-// Blueprint speaks Postgres for portable expression defaults; translate them.
+// Portable default markers emitted by core's Blueprint — see Schema.js.
 // SQLite has no uuid function, so build a v4 out of randomblob().
-const DEFAULT_EXPR_MAP = {
-  'gen_random_uuid()':
+const SQLITE_EXPR_MAP = {
+  uuid:
     "(lower(hex(randomblob(4))||'-'||hex(randomblob(2))||'-4'||substr(hex(randomblob(2)),2)"
     + "||'-'||substr('89ab',abs(random())%4+1,1)||substr(hex(randomblob(2)),2)"
     + "||'-'||hex(randomblob(6))))",
+  now: 'CURRENT_TIMESTAMP',
+  today: 'CURRENT_DATE',
 }
 
 /**
@@ -789,9 +883,13 @@ const DEFAULT_EXPR_MAP = {
  * be parenthesized — `DEFAULT foo()` is a syntax error, `DEFAULT (foo())` is not.
  */
 function formatDefault(value) {
+  if (value && typeof value === 'object' && typeof value.expr === 'string') {
+    const sql = SQLITE_EXPR_MAP[value.expr]
+    if (!sql) throw new Error(`[EloquentJS/sqlite] Unknown default expression "${value.expr}"`)
+    return sql
+  }
   if (typeof value === 'boolean') return value ? '1' : '0'
   if (typeof value !== 'string') return String(value)
-  if (DEFAULT_EXPR_MAP[value]) return DEFAULT_EXPR_MAP[value]
   if (/^\(.*\)$/.test(value)) return value
   if (/^[A-Za-z_][\w.]*\s*\(.*\)$/.test(value)) return `(${value})`
   if (/^(CURRENT_(TIMESTAMP|DATE|TIME)|NULL|TRUE|FALSE)$/i.test(value)) return value
@@ -814,16 +912,3 @@ function extractPivot(row, pivotColumns) {
   return { ...rest, _pivot: pivot, _pivot_foreign_id }
 }
 
-// ─── TransactionClient ───────────────────────────────────────────────────────
-class TransactionClient {
-  constructor(db) { this._db = db }
-
-  async query(sql, params = []) {
-    const stmt = this._db.prepare(toSqlitePlaceholders(sql))
-    if (isReader(stmt, sql)) return { rows: stmt.all(...params), rowCount: 0 }
-    const result = stmt.run(...params)
-    return { rows: [], rowCount: result.changes }
-  }
-
-  prepare(sql) { return this._db.prepare(sql) }
-}

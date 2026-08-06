@@ -8,6 +8,7 @@
 import { readFileSync } from 'fs'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
+import { internalRange } from './internal-range.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(__dirname, '..')
@@ -59,13 +60,13 @@ for (const { dir, name, version } of versions) {
 // 3. Check internal dependency versions
 console.log(`\n${c.bold}Checking internal dependency versions${c.reset}\n`)
 
-for (const { dir, name, pkg } of versions) {
+for (const { name, pkg } of versions) {
     for (const depField of ['dependencies', 'peerDependencies', 'devDependencies']) {
         if (!pkg[depField]) continue
         for (const [depName, depVer] of Object.entries(pkg[depField])) {
             if (!depName.startsWith('@eloquentjs/')) continue
             // Expected: ^<rootVersion>
-            const expected = `^${rootVersion}`
+            const expected = internalRange(rootVersion)
             if (depVer === expected) {
                 console.log(`  ${c.green}✔${c.reset}  ${name} → ${depName}: ${depVer}`)
             } else {

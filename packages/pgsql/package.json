@@ -11,15 +11,10 @@
     }
   },
   "dependencies": {
-    "@eloquentjs/core": "^0.0.7"
+    "@eloquentjs/core": ">=0.0.7 <0.1.0"
   },
   "peerDependencies": {
     "pg": "^8.13.0"
-  },
-  "peerDependenciesMeta": {
-    "pg": {
-      "optional": true
-    }
   },
   "devDependencies": {
     "pg": "^8.13.0"
@@ -31,7 +26,8 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/AnandPilania/eloquentjs.git"
+    "url": "git+https://github.com/AnandPilania/eloquentjs.git",
+    "directory": "packages/pgsql"
   },
   "bugs": {
     "url": "https://github.com/AnandPilania/eloquentjs/issues"
@@ -47,6 +43,7 @@
   ],
   "types": "dist-types/index.d.ts",
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json",
+    "prepublishOnly": "npm run build"
   }
 }

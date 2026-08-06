@@ -76,20 +76,54 @@ await disconnect()
 
 ## Transactions
 
-```js
-import { transaction } from '@eloquentjs/pgsql'
+Prefer the driver-agnostic facade — it works identically on every driver:
 
-// All operations inside share one connection and are rolled back on error
-await transaction(async () => {
+```js
+import { DB } from '@eloquentjs/core'
+
+// Every model write inside runs on the transaction's connection, including in
+// anything the callback awaits.
+await DB.transaction(async () => {
   const user = await User.create({ name: 'Alice' })
   await user.profile().create({ bio: 'Hello' })
   await user.roles().attach(adminRoleId)
-  // Any thrown error → automatic rollback
+  // Any thrown error → ROLLBACK, and none of the above is durable
 })
 
-// Use a named connection for transactions
-await transaction(callback, 'primary')
+await DB.transaction(callback, 'primary')   // a named connection
+DB.inTransaction()                          // true inside the callback
 ```
+
+The driver export is equivalent and delegates to the same implementation:
+
+```js
+import { transaction } from '@eloquentjs/pgsql'
+
+await transaction(async (tx) => {
+  await tx.raw('SET LOCAL statement_timeout = 5000')   // the tx connection
+  await User.create({ name: 'Alice' })                 // also the tx connection
+})
+```
+
+**Nested calls become savepoints.** An inner transaction that throws rolls back
+only its own work; the outer one continues:
+
+```js
+await DB.transaction(async () => {
+  await Account.create({ name: 'outer' })
+  try {
+    await DB.transaction(async () => {
+      await Account.create({ name: 'inner' })
+      throw new Error('nope')          // ROLLBACK TO SAVEPOINT
+    })
+  } catch { /* 'outer' survives */ }
+})
+```
+
+How this works: the driver checks out a dedicated client, `BEGIN`s on it, and
+publishes a resolver bound to that client through an `AsyncLocalStorage` scope,
+so every `getResolver()` beneath — including the ones inside `Model.save()` —
+returns it. Nothing has to be threaded through your call sites.
 
 ---
 

@@ -2,13 +2,18 @@
  * @eloquentjs/mongodb — MongoDB Driver
  *
  * Translates the QueryBuilder context into MongoDB filter/pipeline objects.
- * Primary key is always normalized to both `_id` (ObjectId) and `id` (string).
+ *
+ * `id` is an alias of `_id` in both directions: reads expose the ObjectId as a
+ * string under both keys, and every write/filter path maps `id` back to `_id`
+ * and coerces the value to an ObjectId. That means the default
+ * `Model.primaryKey = 'id'` works unchanged — no `static primaryKey = '_id'`
+ * needed. (Before this, `find()` never matched and `save()` updated 0 docs.)
  *
  * Supports multiple named connections via a Map — mirrors the PgSQL driver.
  */
 
 import { MongoClient, ObjectId } from 'mongodb'
-import { setResolver } from '@eloquentjs/core'
+import { setResolver, getResolver, runInTransaction } from '@eloquentjs/core'
 
 /**
  * @typedef {Object} ConnectOptions
@@ -87,24 +92,15 @@ export async function disconnect(connectionName) {
 
 /**
  * Run a function inside a MongoDB session transaction. Rolls back on throw.
+ * Delegates to the resolver so model writes inside participate — see
+ * MongoResolver.transaction().
  * @template T
- * @param {(session: import('mongodb').ClientSession) => Promise<T>} callback
+ * @param {(tx: any) => Promise<T>} callback
  * @param {string} connectionName
  * @returns {Promise<T>}
  */
 export async function transaction(callback, connectionName = 'default') {
-    const session = _getClient(connectionName).startSession()
-    try {
-        session.startTransaction()
-        const result = await callback(session)
-        await session.commitTransaction()
-        return result
-    } catch (err) {
-        await session.abortTransaction()
-        throw err
-    } finally {
-        session.endSession()
-    }
+    return getResolver(connectionName).transaction(callback)
 }
 
 // ─── MongoResolver ───────────────────────────────────────────────────────────
@@ -113,13 +109,62 @@ export class MongoResolver {
      * @param {import('mongodb').Db} db
      * @param {string} connectionName
      */
-    constructor(db, connectionName = 'default') {
+    /**
+     * Relations that need a JOIN (belongsToMany, hasManyThrough) check this and
+     * throw a clear error rather than silently ignoring the join clause.
+     */
+    supportsJoins = false
+
+    constructor(db, connectionName = 'default', session = null) {
         this._db = db
         this._connectionName = connectionName
+        /** @type {import('mongodb').ClientSession | null} */
+        this._session = session
     }
 
     /** @param {string} table */
     _col(table) { return this._db.collection(table) }
+
+    /**
+     * Run a raw database command. MongoDB has no SQL, so `sql` is a command
+     * document (or its JSON string) passed to db.command().
+     * @param {Record<string, any>|string} command
+     */
+    async raw(command) {
+        const doc = typeof command === 'string' ? JSON.parse(command) : command
+        return this._db.command(doc, this._opts)
+    }
+
+    /** Options every driver call passes so it joins the active transaction. */
+    get _opts() { return this._session ? { session: this._session } : {} }
+
+    // ── TRANSACTIONS ───────────────────────────────────────────────────────────
+    /**
+     * Start a session transaction and publish a session-bound resolver for the
+     * duration of the callback, so model writes inside participate.
+     * MongoDB has no savepoints — a nested call joins the outer transaction.
+     * @template T
+     * @param {(tx: any) => Promise<T>} fn
+     * @returns {Promise<T>}
+     */
+    async transaction(fn) {
+        if (this._session) return fn(this)   // already in one; no nested transactions in Mongo
+
+        const client = _getClient(this._connectionName)
+        const session = client.startSession()
+        const scoped = new MongoResolver(this._db, this._connectionName, session)
+        try {
+            session.startTransaction()
+            const result = await runInTransaction(this._connectionName, scoped, () => fn(scoped))
+            await session.commitTransaction()
+            return result
+        } catch (err) {
+            await session.abortTransaction().catch(() => { })
+            throw err
+        } finally {
+            await session.endSession()
+        }
+    }
 
     /**
      * @param {string} table
@@ -127,14 +172,17 @@ export class MongoResolver {
      * @returns {Promise<Record<string, any>[]>}
      */
     async select(table, ctx) {
+        if (ctx.unions?.length) {
+            throw new Error('[EloquentJS] MongoDBResolver does not support union() — SQL UNION has no equivalent find() semantics here.')
+        }
         const filter = buildFilter(ctx)
-        let cursor = this._col(table).find(filter)
+        let cursor = this._col(table).find(filter, this._opts)
 
         // Projection
         const selects = ctx.selects ?? ['*']
         if (selects.length && selects[0] !== '*' && !selects[0]?.raw) {
             const proj = {}
-            for (const s of selects) proj[s] = 1
+            for (const s of selects) proj[mapColumn(s)] = 1
             cursor = cursor.project(proj)
         }
 
@@ -144,7 +192,7 @@ export class MongoResolver {
             for (const o of ctx.orderBys) {
                 if (o.random) continue
                 if (o.raw) continue
-                sort[o.column] = o.direction === 'DESC' ? -1 : 1
+                sort[mapColumn(o.column)] = o.direction === 'DESC' ? -1 : 1
             }
             if (Object.keys(sort).length) cursor = cursor.sort(sort)
         }
@@ -162,7 +210,7 @@ export class MongoResolver {
      */
     async insert(table, data) {
         const doc = prepareInsertDoc(data)
-        const result = await this._col(table).insertOne(doc)
+        const result = await this._col(table).insertOne(doc, this._opts)
         const id = result.insertedId.toString()
         return { ...normalizeDoc(doc), id, _id: id, insertedId: result.insertedId }
     }
@@ -174,7 +222,7 @@ export class MongoResolver {
     async insertMany(table, rows) {
         if (!Array.isArray(rows) || !rows.length) return []
         const docs = rows.map(prepareInsertDoc)
-        const result = await this._col(table).insertMany(docs)
+        const result = await this._col(table).insertMany(docs, this._opts)
         return docs.map((doc, i) => normalizeDoc({ ...doc, _id: doc._id ?? result.insertedIds[i] }))
     }
 
@@ -187,10 +235,13 @@ export class MongoResolver {
      */
     async update(table, conditions, data, ctx = null) {
         const filter = ctx ? buildFilter(ctx) : buildSimpleFilter(conditions)
-        // Remove undefined values
-        const $set = Object.fromEntries(Object.entries(data).filter(([, v]) => v !== undefined))
+        // Drop undefined values and the immutable key — Mongo rejects $set on _id,
+        // and `id` is only ever a read-side alias of it.
+        const $set = Object.fromEntries(
+            Object.entries(data).filter(([k, v]) => v !== undefined && k !== '_id' && k !== 'id')
+        )
         if (!Object.keys($set).length) return 0
-        const result = await this._col(table).updateMany(filter, { $set })
+        const result = await this._col(table).updateMany(filter, { $set }, this._opts)
         return result.modifiedCount
     }
 
@@ -202,7 +253,7 @@ export class MongoResolver {
      */
     async delete(table, conditions, ctx = null) {
         const filter = ctx ? buildFilter(ctx) : buildSimpleFilter(conditions)
-        const result = await this._col(table).deleteMany(filter)
+        const result = await this._col(table).deleteMany(filter, this._opts)
         return result.deletedCount
     }
 
@@ -215,27 +266,47 @@ export class MongoResolver {
      */
     async aggregate(table, fn, column, ctx) {
         const match = buildFilter(ctx)
+        const field = `$${mapColumn(column)}`
         const aggMap = {
             count: { $sum: 1 },
-            sum: { $sum: `$${column}` },
-            avg: { $avg: `$${column}` },
-            max: { $max: `$${column}` },
-            min: { $min: `$${column}` },
+            sum: { $sum: field },
+            avg: { $avg: field },
+            max: { $max: field },
+            min: { $min: field },
         }
-        const pipeline = [
-            { $match: match },
-            { $group: { _id: null, _result: aggMap[fn] } },
-        ]
-        const rows = await this._col(table).aggregate(pipeline).toArray()
+
+        // A grouped query aggregates over the *groups*, not the rows —
+        // otherwise count() reports the size of the first group.
+        const groupBys = ctx?.groupBys ?? []
+        /** @type {Record<string, any>[]} */
+        const pipeline = [{ $match: match }]
+        if (groupBys.length) {
+            pipeline.push({
+                $group: {
+                    _id: Object.fromEntries(groupBys.map(c => [c.replace(/\./g, '_'), `$${mapColumn(c)}`])),
+                    _inner: aggMap[fn],
+                },
+            })
+            pipeline.push({
+                $group: {
+                    _id: null,
+                    _result: fn === 'count' ? { $sum: 1 } : { [`$${fn}`]: '$_inner' },
+                },
+            })
+        } else {
+            pipeline.push({ $group: { _id: null, _result: aggMap[fn] } })
+        }
+
+        const rows = await this._col(table).aggregate(pipeline, this._opts).toArray()
         const val = rows[0]?._result
         return val == null ? (fn === 'count' ? 0 : null) : val
     }
 
     async increment(table, column, amount, extra, ctx) {
         const filter = buildFilter(ctx)
-        const update = { $inc: { [column]: amount } }
+        const update = { $inc: { [mapColumn(column)]: amount } }
         if (extra && Object.keys(extra).length) update.$set = extra
-        const result = await this._col(table).updateMany(filter, update)
+        const result = await this._col(table).updateMany(filter, update, this._opts)
         return result.modifiedCount
     }
 
@@ -249,19 +320,23 @@ export class MongoResolver {
 
     async hasManyThrough({ relatedTable, throughTable, firstKey, secondKey, throughKey, parentId }) {
         // Use $lookup — simplified version
-        const throughs = await this._col(throughTable).find({ [firstKey]: toObjectIdIfValid(parentId) }).toArray()
+        const throughs = await this._col(throughTable)
+            .find({ [mapColumn(firstKey)]: toObjectIdIfValid(parentId) }, this._opts).toArray()
         const throughIds = throughs.map(t => t._id)
-        const docs = await this._col(relatedTable).find({ [secondKey]: { $in: throughIds } }).toArray()
+        const docs = await this._col(relatedTable)
+            .find({ [mapColumn(secondKey)]: { $in: throughIds } }, this._opts).toArray()
         return docs.map(normalizeDoc)
     }
 
     async hasManyThroughMany({ relatedTable, throughTable, firstKey, secondKey, throughKey, parentIds }) {
-        const throughs = await this._col(throughTable).find({ [firstKey]: { $in: parentIds.map(toObjectIdIfValid) } }).toArray()
-        const parentMap = {}
-        for (const t of throughs) parentMap[t._id.toString()] = t[firstKey]
+        const throughs = await this._col(throughTable)
+            .find({ [mapColumn(firstKey)]: { $in: parentIds.map(toObjectIdIfValid) } }, this._opts).toArray()
+        const parentMap = Object.create(null)
+        for (const t of throughs) parentMap[t._id.toString()] = t[mapColumn(firstKey)]
 
         const throughIds = throughs.map(t => t._id)
-        const docs = await this._col(relatedTable).find({ [secondKey]: { $in: throughIds } }).toArray()
+        const docs = await this._col(relatedTable)
+            .find({ [mapColumn(secondKey)]: { $in: throughIds } }, this._opts).toArray()
         return docs.map(doc => ({
             ...normalizeDoc(doc),
             _parent_id: parentMap[doc[secondKey]?.toString()],
@@ -274,7 +349,7 @@ export class MongoResolver {
 
     /** @param {string} table */
     async truncate(table) {
-        await this._col(table).deleteMany({})
+        await this._col(table).deleteMany({}, this._opts)
     }
 
     // ── DDL (MongoDB = schemaless, but we support indexes) ──────────────────────
@@ -283,7 +358,7 @@ export class MongoResolver {
         const col = this._col(table)
         for (const idx of blueprint.indexes) {
             if (idx.type === 'dropIndex' || idx.type === 'dropUnique') continue
-            const keys = Object.fromEntries(idx.columns.map(c => [c, 1]))
+            const keys = Object.fromEntries(idx.columns.map(c => [mapColumn(c), 1]))
             const opts = {}
             if (idx.type === 'unique') opts.unique = true
             if (idx.name) opts.name = idx.name
@@ -298,7 +373,7 @@ export class MongoResolver {
                 try { await col.dropIndex(idx.name) } catch { }
                 continue
             }
-            const keys = Object.fromEntries(idx.columns.map(c => [c, 1]))
+            const keys = Object.fromEntries(idx.columns.map(c => [mapColumn(c), 1]))
             await col.createIndex(keys, { unique: idx.type === 'unique' })
         }
     }
@@ -323,11 +398,14 @@ export class MongoResolver {
         return cols.length > 0
     }
 
-    async hasColumn() { return true } // schemaless
+    // Arity is part of the resolver contract; see conformance.js MIN_ARITY.
+    async hasColumn(table, column) { return true } // schemaless
 
     async getColumnListing(table) {
-        const doc = await this._col(table).findOne()
-        return doc ? Object.keys(doc) : []
+        const doc = await this._col(table).findOne({}, this._opts)
+        if (!doc) return []
+        // Expose the `id` alias alongside `_id` so callers see the same shape reads have.
+        return Object.keys(doc).flatMap(k => (k === '_id' ? ['_id', 'id'] : [k]))
     }
 }
 
@@ -355,40 +433,72 @@ function combineWheres(wheres) {
 }
 
 function buildWhereCondition(w) {
+    const col = mapColumn(w.column)
+
     switch (w.type) {
         case 'group': {
             const sub = combineWheres(w.wheres ?? [])
             return Object.keys(sub).length ? sub : null
         }
-        case 'in': return { [w.column]: { $in: normalizeIdValue(w.column, w.values ?? []) } }
-        case 'notIn': return { [w.column]: { $nin: normalizeIdValue(w.column, w.values ?? []) } }
-        case 'null': return { [w.column]: { $eq: null } }
-        case 'notNull': return { [w.column]: { $ne: null } }
-        case 'between': return { [w.column]: { $gte: w.min, $lte: w.max } }
-        case 'notBetween': return { [w.column]: { $lt: w.min, $gt: w.max } }
-        case 'jsonContains': return { [w.column]: Array.isArray(w.value) ? { $all: w.value } : w.value }
+        case 'not': {
+            const sub = combineWheres(w.wheres ?? [])
+            return Object.keys(sub).length ? { $nor: [sub] } : null
+        }
+        case 'in': return { [col]: { $in: normalizeIdValue(col, w.values ?? []) } }
+        case 'notIn': return { [col]: { $nin: normalizeIdValue(col, w.values ?? []) } }
+        case 'null': return { [col]: { $eq: null } }
+        case 'notNull': return { [col]: { $ne: null } }
+        case 'between': return { [col]: { $gte: w.min, $lte: w.max } }
+        // Two ranges on one field must be OR-ed; `{$lt, $gt}` is an AND and
+        // therefore unsatisfiable for any min <= max.
+        case 'notBetween': return { $or: [{ [col]: { $lt: w.min } }, { [col]: { $gt: w.max } }] }
+        case 'column': return { $expr: { [EXPR_OP[w.operator?.toUpperCase() ?? '='] ?? '$eq']: [`$${mapColumn(w.first)}`, `$${mapColumn(w.second)}`] } }
+        case 'jsonContains': return { [col]: Array.isArray(w.value) ? { $all: w.value } : w.value }
         default: {
             const opMap = {
                 '=': '$eq', '!=': '$ne', '<>': '$ne',
                 '>': '$gt', '>=': '$gte',
                 '<': '$lt', '<=': '$lte',
-                'LIKE': null,  // handled below
-                'NOT LIKE': null,
-                'ILIKE': null,
             }
             const op = w.operator?.toUpperCase()
             if (op === 'LIKE' || op === 'ILIKE') {
-                const pattern = w.value.replace(/%/g, '.*').replace(/_/g, '.')
-                return { [w.column]: { $regex: new RegExp(`^${pattern}$`, 'i') } }
+                return { [col]: { $regex: likeToRegExp(w.value) } }
             }
-            if (op === 'NOT LIKE') {
-                const pattern = w.value.replace(/%/g, '.*').replace(/_/g, '.')
-                return { [w.column]: { $not: new RegExp(`^${pattern}$`, 'i') } }
+            if (op === 'NOT LIKE' || op === 'NOT ILIKE') {
+                return { [col]: { $not: likeToRegExp(w.value) } }
             }
             const mongoOp = opMap[op] ?? '$eq'
-            return { [w.column]: { [mongoOp]: normalizeIdValue(w.column, w.value) } }
+            return { [col]: { [mongoOp]: normalizeIdValue(col, w.value) } }
         }
     }
+}
+
+const EXPR_OP = { '=': '$eq', '!=': '$ne', '<>': '$ne', '>': '$gt', '>=': '$gte', '<': '$lt', '<=': '$lte' }
+
+/**
+ * SQL LIKE → RegExp. Metacharacters in the *value* have to be escaped, or a
+ * pattern like `whereLike('name', 'a.b')` would match 'axb'; worse, user input
+ * containing `.*` or `(a|b)` would change the query's meaning.
+ */
+function likeToRegExp(value) {
+    let out = ''
+    for (const ch of String(value)) {
+        if (ch === '%') out += '.*'
+        else if (ch === '_') out += '.'
+        else out += ch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    }
+    return new RegExp(`^${out}$`, 'i')
+}
+
+/**
+ * `id` is the alias; `_id` is the storage. Every filter/sort/projection path
+ * goes through here so the default `Model.primaryKey = 'id'` works.
+ */
+function mapColumn(column) {
+    if (column === 'id') return '_id'
+    if (typeof column !== 'string') return column
+    // 'users.id' → 'users._id' is meaningless in Mongo; strip a table prefix.
+    return column
 }
 
 // Mongo's `_id` is stored as ObjectId, but the primary-key lookup path
@@ -403,7 +513,8 @@ function normalizeIdValue(column, value) {
 function buildSimpleFilter(conditions = {}) {
     const filter = {}
     for (const [k, v] of Object.entries(conditions)) {
-        filter[k] = k === '_id' && typeof v === 'string' ? toObjectIdIfValid(v) : v
+        const col = mapColumn(k)
+        filter[col] = col === '_id' ? normalizeIdValue(col, v) : v
     }
     return filter
 }

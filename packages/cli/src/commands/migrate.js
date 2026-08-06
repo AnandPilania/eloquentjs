@@ -1,4 +1,4 @@
-import { colors, info, success } from '../utils.js'
+import { colors } from '../utils.js'
 import { runMigrations } from './migration-runner.js'
 
 export async function cmdMigrate(ctx) {

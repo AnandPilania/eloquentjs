@@ -88,17 +88,71 @@ const CAST_TYPE_MAP = {
 const DEFAULT_TYPE = { jsType: 'string', gqlType: 'String', tsType: 'string', openApiType: { type: 'string' } }
 const ID_TYPE      = { jsType: 'string', gqlType: 'ID',     tsType: 'string', openApiType: { type: 'string' } }
 
+/**
+ * @param {string|Function|Object|undefined} cast
+ * CastRegistry accepts a class or an inline {get,set} object as well as a
+ * string; `cast.split(':')` threw on those.
+ */
 function resolveCastType(cast) {
   if (!cast) return DEFAULT_TYPE
+  if (typeof cast !== 'string') {
+    // A class-based cast can declare its shape: `static codegenType = 'json'`.
+    const declared = /** @type {any} */ (cast)?.codegenType
+    return (declared && CAST_TYPE_MAP[String(declared).toLowerCase()]) ?? DEFAULT_TYPE
+  }
   // Normalize 'decimal:2' → 'decimal'
   const base = cast.split(':')[0].toLowerCase()
   return CAST_TYPE_MAP[base] ?? DEFAULT_TYPE
 }
 
-// ─── Relation type detection ──────────────────────────────────────────────────
-const RELATION_METHODS = ['hasOne', 'hasMany', 'belongsTo', 'belongsToMany', 'hasManyThrough', 'morphTo', 'morphMany', 'morphOne']
+/** A cast value that can be written into a generated stub, or undefined. */
+function castLabel(cast) {
+  return typeof cast === 'string' ? cast : undefined
+}
 
+// ─── Relation type detection ──────────────────────────────────────────────────
+const RELATION_METHODS = [
+  'hasOne', 'hasMany', 'belongsTo', 'belongsToMany', 'hasManyThrough',
+  'hasOneThrough', 'morphTo', 'morphMany', 'morphOne', 'morphToMany', 'morphedByMany',
+]
+
+/**
+ * Relations, preferring an explicit declaration.
+ *
+ *   static relations = {
+ *     posts:   { type: 'hasMany',   related: 'Post' },
+ *     profile: { type: 'hasOne',    related: 'Profile' },
+ *   }
+ *
+ * The fallback regexes `Function.prototype.toString()`, which returns
+ * `function(){[native code]}`-style output under some bundlers and is mangled
+ * by minifiers — hence the declarative option.
+ */
 function detectRelations(ModelClass) {
+  const declared = ModelClass?.relations
+  if (declared && typeof declared === 'object') {
+    return Object.entries(declared).map(([name, def]) => normalizeRelation(name, def))
+  }
+  return detectRelationsFromSource(ModelClass)
+}
+
+function normalizeRelation(name, def) {
+  const type = def.type ?? 'hasMany'
+  const related = typeof def.related === 'function' ? def.related.name : (def.related ?? 'Unknown')
+  return {
+    name,
+    type,
+    related,
+    isList: def.isList ?? LIST_RELATIONS.includes(type),
+    isPolymorphic: def.isPolymorphic ?? POLYMORPHIC_RELATIONS.includes(type),
+    nullable: def.nullable ?? true,
+  }
+}
+
+const LIST_RELATIONS = ['hasMany', 'belongsToMany', 'hasManyThrough', 'morphMany', 'morphToMany', 'morphedByMany']
+const POLYMORPHIC_RELATIONS = ['morphTo', 'morphMany', 'morphOne', 'morphToMany', 'morphedByMany']
+
+function detectRelationsFromSource(ModelClass) {
   const relations = []
   if (!ModelClass?.prototype) return relations
 
@@ -111,25 +165,12 @@ function detectRelations(ModelClass) {
     if (typeof proto[name] !== 'function') continue
     // Introspect function body to detect relation type
     const src = proto[name].toString()
-    const match = src.match(/this\.(hasOne|hasMany|belongsTo|belongsToMany|hasManyThrough|morphTo|morphMany|morphOne)\s*\(/)
+    const match = src.match(new RegExp(`this\\.(${RELATION_METHODS.join('|')})\\s*\\(`))
     if (!match) continue
 
-    const relType = match[1]
     // Try to extract the related model name from source
     const modelMatch = src.match(/this\.\w+\((\w+)/)
-    const relatedName = modelMatch?.[1] ?? 'Unknown'
-
-    const isList = ['hasMany', 'belongsToMany', 'hasManyThrough', 'morphMany'].includes(relType)
-    const isPolymorphic = ['morphTo', 'morphMany', 'morphOne'].includes(relType)
-
-    relations.push({
-      name,
-      type:       relType,
-      related:    relatedName,
-      isList,
-      isPolymorphic,
-      nullable:   true,
-    })
+    relations.push(normalizeRelation(name, { type: match[1], related: modelMatch?.[1] ?? 'Unknown' }))
   }
 
   return relations
@@ -155,111 +196,140 @@ function detectScopes(ModelClass) {
  * @returns {ModelSchema}
  */
 export function introspect(source) {
-  // ── Accept plain descriptor objects (from CLI scaffold, no live class needed) ──
-  if (typeof source !== 'function') {
-    return normalizeDescriptor(source)
-  }
+  const isClass = typeof source === 'function'
+  const ModelClass = isClass ? source : null
+  const desc = isClass ? source : (source ?? {})
 
-  const ModelClass = source
-  const name   = ModelClass.name
-  const table  = ModelClass.table ?? toSnakePlural(name)
-  const pk     = ModelClass.primaryKey ?? 'id'
-  const casts  = ModelClass.casts ?? {}
-  const hidden = new Set(ModelClass.hidden ?? [])
-  const fill   = ModelClass.fillable ?? []
+  const name = desc.name ?? 'Unknown'
+  const table = desc.table ?? toSnakePlural(name)
+  const pk = desc.primaryKey ?? 'id'
+  const keyType = desc.keyType ?? (isClass ? 'integer' : 'integer')
+  const casts = desc.casts ?? {}
+  const hidden = new Set(desc.hidden ?? [])
+  const fill = desc.fillable ?? []
+  const timestamps = desc.timestamps !== false
+  const softDeletes = !!desc.softDeletes
+  const deletedAtColumn = desc.deletedAtColumn ?? 'deleted_at'
+  const createdAtColumn = desc.createdAtColumn ?? 'created_at'
+  const updatedAtColumn = desc.updatedAtColumn ?? 'updated_at'
 
-  // ── Build fields list ─────────────────────────────────────────────────────
-  const fields = []
-
-  // Primary key
-  fields.push({
-    name:     pk,
-    cast:     'uuid',
-    ...ID_TYPE,
-    nullable: false,
-    hidden:   false,
-    fillable: false,
-    isPk:     true,
+  const fields = buildFields({
+    pk, keyType, casts, hidden, fill, timestamps, softDeletes,
+    deletedAtColumn, createdAtColumn, updatedAtColumn,
+    // An explicit column map is the way to declare types for columns that have
+    // no cast: `static columns = { name: 'string', email: 'string' }`
+    columns: desc.columns ?? {},
+    // `nonNullable` names columns the generator should not mark optional.
+    nonNullable: new Set(desc.nonNullable ?? []),
   })
 
-  const TIMESTAMP_COLS   = new Set(['created_at', 'updated_at'])
-  const deletedAtColumn  = ModelClass.deletedAtColumn ?? 'deleted_at'
-
-  // Cast fields
-  for (const [fieldName, cast] of Object.entries(casts)) {
-    if (fieldName === pk) continue
-    const typeInfo = resolveCastType(cast)
-    const isTs = ModelClass.timestamps !== false && TIMESTAMP_COLS.has(fieldName)
-    const isSd = ModelClass.softDeletes && fieldName === deletedAtColumn
-    fields.push({
-      name:     fieldName,
-      cast,
-      ...typeInfo,
-      nullable:      true,
-      hidden:        hidden.has(fieldName),
-      fillable:      fill.includes(fieldName),
-      isPk:          false,
-      isTimestamp:   isTs  || undefined,
-      isSoftDelete:  isSd  || undefined,
-    })
-  }
-
-  // Timestamps (always present unless disabled)
-  if (ModelClass.timestamps !== false) {
-    for (const col of ['created_at', 'updated_at']) {
-      if (!fields.find(f => f.name === col)) {
-        fields.push({
-          name: col, cast: 'datetime', ...resolveCastType('datetime'),
-          nullable: true, hidden: false, fillable: false, isPk: false, isTimestamp: true,
-        })
-      }
-    }
-  }
-
-  // Soft delete column
-  if (ModelClass.softDeletes) {
-    const deletedAt = ModelClass.deletedAtColumn ?? 'deleted_at'
-    if (!fields.find(f => f.name === deletedAt)) {
-      fields.push({
-        name: deletedAt, cast: 'datetime', ...resolveCastType('datetime'),
-        nullable: true, hidden: false, fillable: false, isPk: false, isSoftDelete: true,
-      })
-    }
-  }
-
   // ── GraphQL overrides ─────────────────────────────────────────────────────
-  const gqlConfig   = ModelClass.graphql ?? {}
-  const gqlHidden   = new Set(
-    gqlConfig.fields
-      ? Object.entries(gqlConfig.fields).filter(([,v]) => v === false).map(([k]) => k)
-      : [...hidden]
-  )
+  const gqlConfig = desc.graphql ?? {}
+  // The UNION of `hidden` and explicit `false` entries. Setting graphql.fields
+  // used to *replace* the hidden set, so `static hidden = ['password']` silently
+  // stopped applying and the column appeared in the GraphQL type.
+  const gqlHidden = new Set([
+    ...hidden,
+    ...(gqlConfig.fields
+      ? Object.entries(gqlConfig.fields).filter(([, v]) => v === false).map(([k]) => k)
+      : []),
+  ])
   const gqlDisabled = gqlConfig.queries ?? {}
 
   // ── Assemble schema ───────────────────────────────────────────────────────
   return {
     name,
     table,
-    primaryKey:   pk,
-    softDeletes:  !!ModelClass.softDeletes,
-    timestamps:   ModelClass.timestamps !== false,
-    fillable:     fill,
-    hidden:       [...hidden],
+    primaryKey: pk,
+    softDeletes,
+    timestamps,
+    fillable: fill,
+    hidden: [...hidden],
     fields,
-    relations:    detectRelations(ModelClass),
-    scopes:       detectScopes(ModelClass),
+    relations: isClass ? detectRelations(ModelClass) : (desc.relations ?? []),
+    scopes: isClass ? detectScopes(ModelClass) : (desc.scopes ?? []),
 
     // Feature flags
     graphql: {
-      hidden:    gqlHidden,
-      disabled:  gqlDisabled,
+      hidden: gqlHidden,
+      disabled: gqlDisabled,
       subscription: gqlConfig.subscription !== false,
-      middleware:   gqlConfig.middleware ?? [],
+      middleware: gqlConfig.middleware ?? [],
     },
 
     // Raw class for resolver generation
     ModelClass,
   }
+}
+
+/**
+ * The field list, from every source that tells us a column exists:
+ * `casts`, `columns`, `fillable`, the primary key, timestamps, soft deletes.
+ *
+ * Deriving it from `casts` alone (the previous behaviour) meant a model with
+ * `fillable: ['name','email']` and no casts generated a GraphQL type, a
+ * TypeScript interface and an OpenAPI schema containing only id and timestamps.
+ */
+function buildFields({
+  pk, keyType, casts, hidden, fill, timestamps, softDeletes,
+  deletedAtColumn, createdAtColumn, updatedAtColumn, columns, nonNullable,
+}) {
+  const fields = []
+  const seen = new Set()
+  const timestampCols = new Set(timestamps ? [createdAtColumn, updatedAtColumn] : [])
+
+  const add = (fieldName, cast, extra = {}) => {
+    if (seen.has(fieldName)) return
+    seen.add(fieldName)
+    fields.push({
+      name: fieldName,
+      cast: castLabel(cast),
+      ...resolveCastType(cast),
+      nullable: !nonNullable.has(fieldName),
+      hidden: hidden.has(fieldName),
+      fillable: fill.includes(fieldName),
+      isPk: false,
+      ...extra,
+    })
+  }
+
+  // Primary key — an integer key is an integer, not a uuid string.
+  seen.add(pk)
+  fields.push({
+    name: pk,
+    cast: keyType === 'uuid' ? 'uuid' : 'integer',
+    ...(keyType === 'uuid' ? ID_TYPE : { ...CAST_TYPE_MAP.integer, gqlType: 'ID' }),
+    nullable: false,
+    hidden: hidden.has(pk),
+    fillable: false,
+    isPk: true,
+  })
+
+  // Cast fields
+  for (const [fieldName, cast] of Object.entries(casts)) {
+    add(fieldName, cast, {
+      isTimestamp: timestampCols.has(fieldName) || undefined,
+      isSoftDelete: (softDeletes && fieldName === deletedAtColumn) || undefined,
+    })
+  }
+
+  // Explicitly declared columns
+  for (const [fieldName, cast] of Object.entries(columns)) add(fieldName, cast)
+
+  // Fillable columns with no declared type default to string
+  for (const fieldName of fill) add(fieldName, undefined)
+
+  // Timestamps (always present unless disabled)
+  if (timestamps) {
+    for (const col of [createdAtColumn, updatedAtColumn]) {
+      add(col, 'datetime', { isTimestamp: true })
+    }
+  }
+
+  // Soft delete column
+  if (softDeletes) add(deletedAtColumn, 'datetime', { isSoftDelete: true })
+
+  return fields
 }
 
 /**
@@ -271,53 +341,9 @@ export function introspectAll(models) {
   return models.map(m => introspect(m))
 }
 
-/**
- * Normalize a plain descriptor (used by CLI generators that don't have live classes).
- */
-function normalizeDescriptor(desc) {
-  const name   = desc.name ?? 'Unknown'
-  const table  = desc.table ?? toSnakePlural(name)
-  const casts  = desc.casts ?? {}
-  const hidden = new Set(desc.hidden ?? [])
-  const fill   = desc.fillable ?? []
-  const pk     = desc.primaryKey ?? 'id'
-
-  const fields = [
-    { name: pk, cast: 'uuid', ...ID_TYPE, nullable: false, hidden: false, fillable: false, isPk: true },
-    ...Object.entries(casts).map(([fieldName, cast]) => ({
-      name: fieldName, cast, ...resolveCastType(cast),
-      nullable: true, hidden: hidden.has(fieldName), fillable: fill.includes(fieldName), isPk: false,
-    })),
-  ]
-
-  if (desc.timestamps !== false) {
-    fields.push(
-      { name: 'created_at', cast: 'datetime', ...resolveCastType('datetime'), nullable: true, hidden: false, fillable: false, isPk: false, isTimestamp: true },
-      { name: 'updated_at', cast: 'datetime', ...resolveCastType('datetime'), nullable: true, hidden: false, fillable: false, isPk: false, isTimestamp: true },
-    )
-  }
-  if (desc.softDeletes) {
-    fields.push({ name: 'deleted_at', cast: 'datetime', ...resolveCastType('datetime'), nullable: true, hidden: false, fillable: false, isPk: false, isSoftDelete: true })
-  }
-
-  return {
-    name, table, primaryKey: pk,
-    softDeletes: !!desc.softDeletes,
-    timestamps:  desc.timestamps !== false,
-    fillable: fill,
-    hidden:   [...hidden],
-    fields,
-    relations: desc.relations ?? [],
-    scopes:    desc.scopes ?? [],
-    graphql: {
-      hidden:       new Set(desc.hidden ?? []),
-      disabled:     {},
-      subscription: true,
-      middleware:   [],
-    },
-    ModelClass: null,
-  }
-}
-
+// normalizeDescriptor() used to live here: ~40 duplicated lines of the same
+// field logic that had already drifted (it hard-coded 'deleted_at' and
+// 'created_at'/'updated_at'). Descriptors and live classes now go through
+// introspect()/buildFields() together.
 
 export { resolveCastType, CAST_TYPE_MAP, DEFAULT_TYPE, ID_TYPE }

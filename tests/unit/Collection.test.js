@@ -41,27 +41,81 @@ describe('Collection', () => {
     expect(Array.from(names)).toEqual(['Alice', 'Bob', 'Carol', 'Dave'])
   })
 
-  test('pluck(value, key) returns keyed object', () => {
+  // These three return Maps rather than plain objects: a plain object coerces
+  // every key to a string and a value of '__proto__' or 'constructor' silently
+  // mis-keys or throws.
+  test('pluck(value, key) returns a Map', () => {
     const map = items().pluck('name', 'id')
-    expect(map).toEqual({ 1: 'Alice', 2: 'Bob', 3: 'Carol', 4: 'Dave' })
+    expect(map.get(1)).toBe('Alice')
+    expect(map.get(2)).toBe('Bob')
+    expect(map.size).toBe(4)
   })
 
-  test('keyBy() returns an object keyed by field', () => {
+  test('keyBy() returns a Map keyed by field, preserving key types', () => {
     const keyed = items().keyBy('id')
-    expect(keyed[2].name).toBe('Bob')
+    expect(keyed.get(2).name).toBe('Bob')
   })
 
   test('groupBy() groups items by field', () => {
     const groups = items().groupBy('country')
-    expect(groups['US']).toHaveLength(2)
-    expect(groups['UK']).toHaveLength(1)
-    expect(groups['AU']).toHaveLength(1)
+    expect(groups.get('US')).toHaveLength(2)
+    expect(groups.get('UK')).toHaveLength(1)
+    expect(groups.get('AU')).toHaveLength(1)
   })
 
   test('groupBy() with function key', () => {
     const groups = items().groupBy(i => i.age >= 30 ? 'senior' : 'junior')
-    expect(groups['senior']).toHaveLength(2)
-    expect(groups['junior']).toHaveLength(2)
+    expect(groups.get('senior')).toHaveLength(2)
+    expect(groups.get('junior')).toHaveLength(2)
+  })
+
+  test('groupBy() is safe for a "__proto__" key', () => {
+    const c = new Collection([{ k: '__proto__' }, { k: '__proto__' }])
+    expect(c.groupBy('k').get('__proto__')).toHaveLength(2)
+  })
+
+  test('whereIn/sum/min/max read through getAttribute like where() does', () => {
+    // Previously where() applied casts and accessors while these did not.
+    const fake = v => ({ getAttribute: k => (k === 'n' ? v : undefined), n: 'raw' })
+    const c = new Collection([fake(1), fake(2), fake(3)])
+    expect(c.whereIn('n', [2, 3])).toHaveLength(2)
+    expect(c.sum('n')).toBe(6)
+    expect(c.min('n')).toBe(1)
+    expect(c.max('n')).toBe(3)
+  })
+
+  test('sum() with no key sums the items themselves', () => {
+    expect(new Collection([1, 2, 3]).sum()).toBe(6)
+  })
+
+  test('each() stops when the callback returns false', () => {
+    const seen = []
+    new Collection([1, 2, 3]).each(n => { seen.push(n); if (n === 2) return false })
+    expect(seen).toEqual([1, 2])
+  })
+
+  test('contains(), partition(), implode(), sole() and median()', () => {
+    const c = items()
+    expect(c.contains('name', 'Bob')).toBe(true)
+    expect(c.contains('name', 'Zed')).toBe(false)
+    expect(c.contains(i => i.age >= 30)).toBe(true)
+
+    const [seniors, juniors] = c.partition(i => i.age >= 30)
+    expect(seniors).toHaveLength(2)
+    expect(juniors).toHaveLength(2)
+
+    expect(c.implode('name', ' | ')).toContain('Alice | Bob')
+    expect(new Collection(['a', 'b']).implode('-')).toBe('a-b')
+
+    expect(c.sole(i => i.name === 'Bob').id).toBe(2)
+    expect(() => c.sole()).toThrow(/items matched/)
+    expect(typeof c.median('age')).toBe('number')
+  })
+
+  test('only() and except() are symmetric', () => {
+    const c = new Collection([{ a: 1, b: 2, c: 3 }])
+    expect(c.only('a', 'b')[0]).toEqual({ a: 1, b: 2 })
+    expect(c.except('c')[0]).toEqual({ a: 1, b: 2 })
   })
 
   // ─── Filtering ────────────────────────────────────────────────────────────

@@ -8,13 +8,23 @@
  */
 
 import pg from 'pg'
-import { setResolver } from '@eloquentjs/core'
+import {
+    setResolver, getResolver, runInTransaction,
+    indexName, foreignKeyName, assertOperator,
+} from '@eloquentjs/core'
 
-const { Pool, types } = pg
+const { Pool } = pg
 
-// Return numeric types as JS numbers (pg returns them as strings by default)
-types.setTypeParser(types.builtins.INT8, v => parseInt(v, 10))
-types.setTypeParser(types.builtins.NUMERIC, v => parseFloat(v))
+// Return numeric types as JS numbers (pg returns them as strings by default).
+// Scoped to this driver's pools via `types` on the pool config rather than
+// pg.types, which is process-global and would affect any other pg user.
+const poolTypes = {
+    getTypeParser(oid, format) {
+        if (oid === pg.types.builtins.INT8) return v => parseInt(v, 10)
+        if (oid === pg.types.builtins.NUMERIC) return v => parseFloat(v)
+        return pg.types.getTypeParser(oid, format)
+    },
+}
 
 // ─── Per-connection pool registry ─────────────────────────────────────────────
 // Keyed by connectionName so multiple named connections each get their own pool.
@@ -42,6 +52,7 @@ export async function connect(config = {}, connectionName = 'default') {
             connectionTimeoutMillis: config.connectTimeout ?? 2_000,
             ssl: config.ssl ?? false,
         }
+    poolConfig.types = poolTypes
 
     // Close existing pool for this name before replacing it
     if (_pools.has(connectionName)) {
@@ -60,7 +71,7 @@ export async function connect(config = {}, connectionName = 'default') {
 
     _pools.set(connectionName, pool)
 
-    const resolver = new PgResolver(pool)
+    const resolver = new PgResolver(pool, connectionName)
     setResolver(resolver, connectionName)
     return resolver
 }
@@ -89,26 +100,70 @@ export async function raw(sql, params = [], connectionName = 'default') {
     return result.rows
 }
 
-/** Run a function inside a BEGIN/COMMIT transaction. Rolls back on throw. */
+/**
+ * Run a function inside a BEGIN/COMMIT transaction. Rolls back on throw.
+ * Delegates to the resolver so model writes inside the callback participate —
+ * see PgResolver.transaction().
+ */
 export async function transaction(callback, connectionName = 'default') {
-    const client = await _getPool(connectionName).connect()
-    try {
-        await client.query('BEGIN')
-        const result = await callback(new TransactionClient(client))
-        await client.query('COMMIT')
-        return result
-    } catch (err) {
-        await client.query('ROLLBACK')
-        throw err
-    } finally {
-        client.release()
-    }
+    return getResolver(connectionName).transaction(callback)
 }
 
 // ─── PgResolver ──────────────────────────────────────────────────────────────
 export class PgResolver {
-    constructor(pool) {
+    /**
+     * @param {import('pg').Pool | import('pg').PoolClient} pool
+     * @param {string} connectionName
+     */
+    constructor(pool, connectionName = 'default') {
         this.pool = pool
+        this.connectionName = connectionName
+        /** Savepoint depth — 0 on a pool-backed resolver. */
+        this._txDepth = 0
+    }
+
+    // -- TRANSACTIONS ------------------------------------------------
+    /**
+     * Check out a dedicated client, BEGIN on it, and publish a resolver bound
+     * to that client for the duration of the callback (see runInTransaction).
+     * Nested calls issue SAVEPOINTs on the same client.
+     * @template T
+     * @param {(tx: PgResolver) => Promise<T>} fn
+     * @returns {Promise<T>}
+     */
+    async transaction(fn) {
+        // Already inside one on this client → savepoint.
+        if (this._txDepth > 0) return this._savepoint(fn)
+
+        const client = await this.pool.connect()
+        const scoped = new PgResolver(client, this.connectionName)
+        scoped._txDepth = 1
+        try {
+            await client.query('BEGIN')
+            const result = await runInTransaction(this.connectionName, scoped, () => fn(scoped))
+            await client.query('COMMIT')
+            return result
+        } catch (err) {
+            await client.query('ROLLBACK').catch(() => { })
+            throw err
+        } finally {
+            client.release()
+        }
+    }
+
+    async _savepoint(fn) {
+        const name = `eloquent_sp_${this._txDepth}`
+        const scoped = new PgResolver(this.pool, this.connectionName)
+        scoped._txDepth = this._txDepth + 1
+        await this.pool.query(`SAVEPOINT ${name}`)
+        try {
+            const result = await runInTransaction(this.connectionName, scoped, () => fn(scoped))
+            await this.pool.query(`RELEASE SAVEPOINT ${name}`)
+            return result
+        } catch (err) {
+            await this.pool.query(`ROLLBACK TO SAVEPOINT ${name}`).catch(() => { })
+            throw err
+        }
     }
 
     // -- RAW ---------------------------------------------------------
@@ -227,8 +282,25 @@ export class PgResolver {
             groupBys: ctx?.groupBys ?? [],
             limit: null,
             offset: null,
+            lock: null,
         }
-        const { sql, params } = buildSelect(table, aggCtx)
+
+        let sql, params
+        if (aggCtx.groupBys.length) {
+            // A grouped aggregate returns one row per group; reading rows[0]
+            // would report the first group's value. Count/aggregate the groups.
+            const inner = buildSelect(table, {
+                ...aggCtx,
+                selects: fn === 'count'
+                    ? aggCtx.groupBys.map(c => ({ raw: quoteIdent(c) }))
+                    : [...aggCtx.groupBys.map(c => ({ raw: quoteIdent(c) })), { raw: `${expr} AS _g` }],
+            })
+            const outer = fn === 'count' ? 'COUNT(*)' : `${fn.toUpperCase()}(_g)`
+            sql = `SELECT ${outer} AS _agg FROM (${inner.sql}) AS _grouped`
+            params = inner.params
+        } else {
+            ({ sql, params } = buildSelect(table, aggCtx))
+        }
         const result = await this.pool.query(sql, params)
         const raw = result.rows[0]?._agg
         return raw == null ? (fn === 'count' ? 0 : null) : Number(raw)
@@ -324,36 +396,29 @@ export class PgResolver {
         await this.pool.query(`CREATE TABLE IF NOT EXISTS ${quoteIdent(table)} (\n  ${allDefs}\n)`)
 
         // Stand-alone indexes
-        for (const idx of blueprint.indexes.filter(i => i.type !== 'primary')) {
-            const name = idx.name ?? `${table}_${idx.columns.join('_')}_${idx.type}`
-            const cols = idx.columns.map(quoteIdent).join(', ')
-            if (idx.type === 'unique') {
-                await this.pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS ${quoteIdent(name)} ON ${quoteIdent(table)} (${cols})`)
-            } else if (idx.type === 'index') {
-                await this.pool.query(`CREATE INDEX IF NOT EXISTS ${quoteIdent(name)} ON ${quoteIdent(table)} (${cols})`)
-            }
-        }
+        await this._applyIndexes(table, blueprint.indexes.filter(i => i.type !== 'primary'))
 
         // Foreign key constraints
-        for (const fk of blueprint.foreigns) {
-            if (fk.drop) continue
-            const constraintName = `fk_${table}_${fk.column}`
-            const onDel = (fk.onDelete ?? 'RESTRICT').toUpperCase()
-            const onUpd = (fk.onUpdate ?? 'CASCADE').toUpperCase()
-            const sql = [
-                `ALTER TABLE ${quoteIdent(table)}`,
-                `ADD CONSTRAINT ${quoteIdent(constraintName)}`,
-                `FOREIGN KEY (${quoteIdent(fk.column)})`,
-                `REFERENCES ${quoteIdent(fk.table)} (${quoteIdent(fk.references ?? 'id')})`,
-                `ON DELETE ${onDel} ON UPDATE ${onUpd}`,
-            ].join(' ')
-            await this.pool.query(sql)
-        }
+        await this._applyForeigns(table, blueprint.foreigns)
     }
 
     async alterTable(table, blueprint) {
         for (const col of blueprint.columns) {
             await this.pool.query(`ALTER TABLE ${quoteIdent(table)} ADD COLUMN ${colToSQL(col)}`)
+        }
+        for (const col of blueprint.changes ?? []) {
+            const type = colTypeSQL(col)
+            await this.pool.query(`ALTER TABLE ${quoteIdent(table)} ALTER COLUMN ${quoteIdent(col.name)} TYPE ${type}`)
+            await this.pool.query(
+                `ALTER TABLE ${quoteIdent(table)} ALTER COLUMN ${quoteIdent(col.name)} ` +
+                (col._nullable ? 'DROP NOT NULL' : 'SET NOT NULL')
+            )
+            if (col._default !== undefined) {
+                await this.pool.query(
+                    `ALTER TABLE ${quoteIdent(table)} ALTER COLUMN ${quoteIdent(col.name)} ` +
+                    (col._default === null ? 'DROP DEFAULT' : `SET DEFAULT ${formatDefault(col._default)}`)
+                )
+            }
         }
         for (const col of blueprint.drops) {
             await this.pool.query(`ALTER TABLE ${quoteIdent(table)} DROP COLUMN IF EXISTS ${quoteIdent(col)}`)
@@ -361,19 +426,72 @@ export class PgResolver {
         for (const { from, to } of blueprint.renames) {
             await this.pool.query(`ALTER TABLE ${quoteIdent(table)} RENAME COLUMN ${quoteIdent(from)} TO ${quoteIdent(to)}`)
         }
+        // #30: indexes and foreign keys used to be silently dropped on Postgres.
+        await this._applyIndexes(table, blueprint.indexes ?? [])
+        await this._applyForeigns(table, blueprint.foreigns ?? [])
     }
 
-    async dropTable(table, { ifExists = false } = {}) {
+    async _applyIndexes(table, indexes) {
+        for (const idx of indexes) {
+            if (idx.drop) {
+                await this.pool.query(`DROP INDEX IF EXISTS ${quoteIdent(idx.name ?? indexName(table, idx))}`)
+                continue
+            }
+            if (idx.type === 'primary') {
+                await this.pool.query(
+                    `ALTER TABLE ${quoteIdent(table)} ADD PRIMARY KEY (${idx.columns.map(quoteIdent).join(', ')})`
+                )
+                continue
+            }
+            const name = idx.name ?? indexName(table, idx)
+            const cols = idx.columns.map(quoteIdent).join(', ')
+            const unique = idx.type === 'unique' ? 'UNIQUE ' : ''
+            await this.pool.query(
+                `CREATE ${unique}INDEX IF NOT EXISTS ${quoteIdent(name)} ON ${quoteIdent(table)} (${cols})`
+            )
+        }
+    }
+
+    async _applyForeigns(table, foreigns) {
+        for (const fk of foreigns ?? []) {
+            const constraintName = fk.name ?? foreignKeyName(table, fk.column)
+            if (fk.drop) {
+                await this.pool.query(
+                    `ALTER TABLE ${quoteIdent(table)} DROP CONSTRAINT IF EXISTS ${quoteIdent(constraintName)}`
+                )
+                continue
+            }
+            const onDel = (fk.onDelete ?? 'RESTRICT').toUpperCase()
+            const onUpd = (fk.onUpdate ?? 'CASCADE').toUpperCase()
+            await this.pool.query([
+                `ALTER TABLE ${quoteIdent(table)}`,
+                `ADD CONSTRAINT ${quoteIdent(constraintName)}`,
+                `FOREIGN KEY (${quoteIdent(fk.column)})`,
+                `REFERENCES ${quoteIdent(fk.table)} (${quoteIdent(fk.references ?? 'id')})`,
+                `ON DELETE ${onDel} ON UPDATE ${onUpd}`,
+            ].join(' '))
+        }
+    }
+
+    /**
+     * `cascade: true` is opt-in — Laravel never cascades implicitly, and the
+     * old unconditional CASCADE silently dropped dependent tables/views.
+     */
+    async dropTable(table, { ifExists = false, cascade = false } = {}) {
         const guard = ifExists ? 'IF EXISTS ' : ''
-        await this.pool.query(`DROP TABLE ${guard}${quoteIdent(table)} CASCADE`)
+        await this.pool.query(`DROP TABLE ${guard}${quoteIdent(table)}${cascade ? ' CASCADE' : ''}`)
     }
 
     async renameTable(from, to) {
         await this.pool.query(`ALTER TABLE ${quoteIdent(from)} RENAME TO ${quoteIdent(to)}`)
     }
 
-    async truncate(table) {
-        await this.pool.query(`TRUNCATE TABLE ${quoteIdent(table)} RESTART IDENTITY CASCADE`)
+    async truncate(table, { cascade = false, restartIdentity = false } = {}) {
+        await this.pool.query(
+            `TRUNCATE TABLE ${quoteIdent(table)}`
+            + (restartIdentity ? ' RESTART IDENTITY' : '')
+            + (cascade ? ' CASCADE' : '')
+        )
     }
 
     async hasTable(table) {
@@ -415,9 +533,10 @@ function quoteIdent(name) {
     if (!name || name === '*') return name
     // Handle already-quoted identifiers
     if (name.startsWith('"') && name.endsWith('"')) return name
-    // Handle "table.column" — quote each part
+    // Handle "table.column" — quote each part. `table.*` must stay a star;
+    // "table"."*" is a syntax error.
     if (name.includes('.')) {
-        return name.split('.').map(p => `"${p.replace(/"/g, '""')}"`).join('.')
+        return name.split('.').map(p => (p === '*' ? '*' : `"${p.replace(/"/g, '""')}"`)).join('.')
     }
     return `"${name.replace(/"/g, '""')}"`
 }
@@ -427,8 +546,9 @@ function quoteIdent(name) {
  * Uses a single shared params array so all parameter numbers ($N)
  * are globally unique within the statement.
  */
-function buildSelect(table, ctx) {
+function buildSelect(table, ctx, startOffset = 0) {
     const params = []
+    const ph = () => `$${startOffset + params.length}`
 
     // ── SELECT clause ────────────────────────────────────────────────────────
     const selects = (ctx.selects ?? ['*']).map(s => {
@@ -445,12 +565,12 @@ function buildSelect(table, ctx) {
             sql += ` CROSS JOIN ${quoteIdent(j.table)}`
         } else {
             // Quote first and second as dotted identifiers (e.g. "users"."id")
-            sql += ` ${j.type} JOIN ${quoteIdent(j.table)} ON ${quoteIdent(j.first)} ${j.operator} ${quoteIdent(j.second)}`
+            sql += ` ${j.type} JOIN ${quoteIdent(j.table)} ON ${quoteIdent(j.first)} ${assertOperator(j.operator ?? '=')} ${quoteIdent(j.second)}`
         }
     }
 
     // ── WHERE ────────────────────────────────────────────────────────────────
-    const { clause: whereClause, whereParams } = buildWhereClauses(ctx, 0)
+    const { clause: whereClause, whereParams } = buildWhereClauses(ctx, startOffset)
     if (whereClause) {
         sql += ` WHERE ${whereClause}`
         params.push(...whereParams)
@@ -458,15 +578,29 @@ function buildSelect(table, ctx) {
 
     // ── GROUP BY ─────────────────────────────────────────────────────────────
     if (ctx.groupBys?.length) {
-        sql += ` GROUP BY ${ctx.groupBys.map(quoteIdent).join(', ')}`
+        sql += ` GROUP BY ${ctx.groupBys.map(g => (g?.raw ? g.raw : quoteIdent(g))).join(', ')}`
     }
 
     // ── HAVING — one clause, conditions AND-ed ───────────────────────────────
     const havingParts = (ctx.havings ?? []).map(h => {
+        if (h.raw) return h.raw
         params.push(h.value)
-        return `${quoteIdent(h.column)} ${h.operator} $${params.length}`
+        return `${h.aggregate ? `${h.aggregate.toUpperCase()}(${h.column === '*' ? '*' : quoteIdent(h.column)})` : quoteIdent(h.column)} ${assertOperator(h.operator)} ${ph()}`
     })
     if (havingParts.length) sql += ` HAVING ${havingParts.join(' AND ')}`
+
+    // A branch's own ORDER BY/LIMIT is meaningless inside a compound SELECT, so
+    // union branches are rendered without them. startOffset carries forward so
+    // $N numbering stays globally unique across the whole statement.
+    for (const u of ctx.unions ?? []) {
+        const branch = buildSelect(
+            u.table,
+            { ...u.ctx, unions: [], orderBys: [], limit: null, offset: null },
+            startOffset + params.length
+        )
+        sql += ` UNION ${u.all ? 'ALL ' : ''}${branch.sql}`
+        params.push(...branch.params)
+    }
 
     // ── ORDER BY — all clauses in ONE ORDER BY, comma-separated ──────────────
     const orderParts = (ctx.orderBys ?? []).map(o => {
@@ -477,8 +611,12 @@ function buildSelect(table, ctx) {
     if (orderParts.length) sql += ` ORDER BY ${orderParts.join(', ')}`
 
     // ── LIMIT / OFFSET ───────────────────────────────────────────────────────
-    if (ctx.limit != null) { params.push(ctx.limit); sql += ` LIMIT $${params.length}` }
-    if (ctx.offset != null) { params.push(ctx.offset); sql += ` OFFSET $${params.length}` }
+    if (ctx.limit != null) { params.push(ctx.limit); sql += ` LIMIT ${ph()}` }
+    if (ctx.offset != null) { params.push(ctx.offset); sql += ` OFFSET ${ph()}` }
+
+    // ── LOCKING ──────────────────────────────────────────────────────────────
+    if (ctx.lock === 'update') sql += ' FOR UPDATE'
+    else if (ctx.lock === 'shared') sql += ' FOR SHARE'
 
     return { sql, params }
 }
@@ -525,8 +663,21 @@ function buildWhereClauses(ctx, startOffset) {
                 clause = `${quoteIdent(w.column)} NOT BETWEEN ${push(w.min)} AND ${push(w.max)}`
                 break
             case 'date':
-                clause = `${quoteIdent(w.column)}::date ${w.operator} ${push(w.value)}`
+                clause = `${quoteIdent(w.column)}::date ${assertOperator(w.operator ?? '=')} ${push(w.value)}`
                 break
+            case 'time':
+                clause = `${quoteIdent(w.column)}::time ${assertOperator(w.operator ?? '=')} ${push(w.value)}`
+                break
+            case 'column':
+                clause = `${quoteIdent(w.first)} ${assertOperator(w.operator ?? '=')} ${quoteIdent(w.second)}`
+                break
+            case 'exists':
+            case 'notExists': {
+                const sub = buildSelect(w.table, w.ctx, startOffset + whereParams.length)
+                whereParams.push(...sub.params)
+                clause = `${w.type === 'notExists' ? 'NOT ' : ''}EXISTS (${sub.sql})`
+                break
+            }
             case 'year':
                 clause = `EXTRACT(YEAR FROM ${quoteIdent(w.column)}) = ${push(w.value)}`
                 break
@@ -539,18 +690,19 @@ function buildWhereClauses(ctx, startOffset) {
             case 'jsonContains':
                 clause = `${quoteIdent(w.column)} @> ${push(JSON.stringify(w.value))}::jsonb`
                 break
-            case 'group': {
+            case 'group':
+            case 'not': {
                 const sub = buildWhereClauses(
                     { wheres: w.wheres, rawWheres: w.rawWheres },
                     startOffset + whereParams.length
                 )
                 if (!sub.clause) continue
                 whereParams.push(...sub.whereParams)
-                clause = `(${sub.clause})`
+                clause = w.type === 'not' ? `NOT (${sub.clause})` : `(${sub.clause})`
                 break
             }
             default:
-                clause = `${quoteIdent(w.column)} ${w.operator} ${push(w.value)}`
+                clause = `${quoteIdent(w.column)} ${assertOperator(w.operator)} ${push(w.value)}`
         }
 
         parts.push({ bool, clause })
@@ -589,6 +741,9 @@ const PG_TYPE_MAP = {
     string: null,   // handled below (needs length)
     char: null,
     text: 'TEXT',
+    tinyText: 'TEXT',
+    mediumText: 'TEXT',
+    longText: 'TEXT',
     boolean: 'BOOLEAN',
     date: 'DATE',
     time: 'TIME',
@@ -604,7 +759,7 @@ const PG_TYPE_MAP = {
     enum: null,   // handled below
 }
 
-function colToSQL(col) {
+function colTypeSQL(col) {
     let sqlType
 
     switch (col.type) {
@@ -616,10 +771,14 @@ function colToSQL(col) {
             sqlType = PG_TYPE_MAP[col.type] ?? col.type.toUpperCase()
     }
 
-    if (col.unsigned && col.type === 'integer') sqlType = 'INTEGER' // pg has no unsigned
-    if (col.unsigned && col.type === 'bigInteger') sqlType = 'BIGINT'
+    if (col._unsigned && col.type === 'integer') sqlType = 'INTEGER' // pg has no unsigned
+    if (col._unsigned && col.type === 'bigInteger') sqlType = 'BIGINT'
 
-    let def = `${quoteIdent(col.name)} ${sqlType}`
+    return sqlType
+}
+
+function colToSQL(col) {
+    let def = `${quoteIdent(col.name)} ${colTypeSQL(col)}`
 
     if (col.primaryKey && !['bigIncrements', 'increments'].includes(col.type)) {
         def += ' PRIMARY KEY'
@@ -637,12 +796,24 @@ function colToSQL(col) {
     return def
 }
 
+/** Portable default markers emitted by core's Blueprint — see Schema.js. */
+const PG_EXPR_MAP = {
+    uuid: 'gen_random_uuid()',
+    now: 'CURRENT_TIMESTAMP',
+    today: 'CURRENT_DATE',
+}
+
 /**
- * Render a column default. String values are quoted literals *unless* they
- * look like SQL — a function call (`gen_random_uuid()`, which Blueprint.uuid()
- * emits) or a bare SQL keyword.
+ * Render a column default. `{expr: 'uuid'}` markers come from core's Blueprint
+ * and are rendered per-driver. Plain strings are quoted literals *unless* they
+ * look like SQL — a function call or a bare SQL keyword.
  */
 function formatDefault(value) {
+    if (value && typeof value === 'object' && typeof value.expr === 'string') {
+        const sql = PG_EXPR_MAP[value.expr]
+        if (!sql) throw new Error(`[EloquentJS/pgsql] Unknown default expression "${value.expr}"`)
+        return sql
+    }
     if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE'
     if (typeof value !== 'string') return String(value)
     if (/^[A-Za-z_][\w.]*\s*\(.*\)$/.test(value)) return value
@@ -660,10 +831,4 @@ function extractPivot(row, pivotColumns) {
         delete rest[key]
     }
     return { ...rest, _pivot: pivot, _pivot_foreign_id }
-}
-
-// ─── TransactionClient ────────────────────────────────────────────────────────
-class TransactionClient {
-    constructor(client) { this._client = client }
-    async query(sql, params = []) { return this._client.query(sql, params) }
 }

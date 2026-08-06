@@ -31,6 +31,8 @@
  *   await v.validateAsync()
  */
 
+import { DB } from '@eloquentjs/core'
+
 export class Rule {
   /**
    * Whether this rule runs even when the value is null/undefined.
@@ -127,27 +129,25 @@ export class UniqueRule extends Rule {
 
   message() { return 'The :field has already been taken.' }
 
+  /**
+   * No try/catch: a uniqueness check that swallows its own errors always
+   * passes, which is exactly the wrong failure mode for a rule whose job is
+   * to reject duplicates. If the database is unreachable, that must surface.
+   */
   async passesAsync(field, value, data) {
     if (value == null || value === '') return true
-    try {
-      const { getResolver } = await import('@eloquentjs/core')
-      const resolver = this.connection ?? getResolver()
-      if (!resolver) return true // no DB — skip
 
-      let qb = resolver.table(this.table).where(this.column ?? field, value)
+    let qb = DB.table(this.table, this.connection ?? 'default')
+      .where(this.column ?? field, value)
 
-      if (this._ignoreId != null) {
-        qb = qb.where(this._ignoreCol, '!=', this._ignoreId)
-      }
-      for (const [col, val] of this._where) {
-        qb = qb.where(col, val)
-      }
-
-      const count = await qb.count()
-      return Number(count) === 0
-    } catch {
-      return true // fail-open if DB unavailable
+    if (this._ignoreId != null) {
+      qb = qb.where(this._ignoreCol, '!=', this._ignoreId)
     }
+    for (const [col, val] of this._where) {
+      qb = qb.where(col, val)
+    }
+
+    return Number(await qb.count()) === 0
   }
 }
 
@@ -175,21 +175,13 @@ export class ExistsRule extends Rule {
 
   async passesAsync(field, value, data) {
     if (value == null || value === '') return true
-    try {
-      const { getResolver } = await import('@eloquentjs/core')
-      const resolver = this.connection ?? getResolver()
-      if (!resolver) return true
 
-      let qb = resolver.table(this.table).where(this.column, value)
-      for (const [col, val] of this._where) {
-        qb = qb.where(col, val)
-      }
-
-      const count = await qb.count()
-      return Number(count) > 0
-    } catch {
-      return true
+    let qb = DB.table(this.table, this.connection ?? 'default').where(this.column, value)
+    for (const [col, val] of this._where) {
+      qb = qb.where(col, val)
     }
+
+    return Number(await qb.count()) > 0
   }
 }
 
