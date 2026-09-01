@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.0.9] — 2026-09-01
+
+### 🐛 Bug Fixes
+
+- cli for model path (`5507e7f`)
+
+
+---
+
 ## [0.0.8] — 2026-08-06
 
 ### 💥 Breaking Changes

@@ -1,6 +1,6 @@
 {
   "name": "@eloquentjs/cli",
-  "version": "0.0.8",
+  "version": "0.0.9",
   "description": "CLI for EloquentJS — scaffold models, migrations, seeders and more",
   "type": "module",
   "main": "src/index.js",
@@ -37,13 +37,13 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "@eloquentjs/core": ">=0.0.8 <0.1.0",
-    "@eloquentjs/codegen": ">=0.0.8 <0.1.0"
+    "@eloquentjs/core": ">=0.0.9 <0.1.0",
+    "@eloquentjs/codegen": ">=0.0.9 <0.1.0"
   },
   "peerDependencies": {
-    "@eloquentjs/pgsql": ">=0.0.8 <0.1.0",
-    "@eloquentjs/mongodb": ">=0.0.8 <0.1.0",
-    "@eloquentjs/sqlite": ">=0.0.8 <0.1.0"
+    "@eloquentjs/pgsql": ">=0.0.9 <0.1.0",
+    "@eloquentjs/mongodb": ">=0.0.9 <0.1.0",
+    "@eloquentjs/sqlite": ">=0.0.9 <0.1.0"
   },
   "peerDependenciesMeta": {
     "@eloquentjs/pgsql": {

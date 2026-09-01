@@ -1,6 +1,6 @@
 {
   "name": "@eloquentjs/graphql",
-  "version": "0.0.8",
+  "version": "0.0.9",
   "description": "Auto-generated GraphQL schema and resolvers from EloquentJS models",
   "type": "module",
   "main": "src/index.js",
@@ -11,8 +11,8 @@
     }
   },
   "dependencies": {
-    "@eloquentjs/core": ">=0.0.8 <0.1.0",
-    "@eloquentjs/codegen": ">=0.0.8 <0.1.0"
+    "@eloquentjs/core": ">=0.0.9 <0.1.0",
+    "@eloquentjs/codegen": ">=0.0.9 <0.1.0"
   },
   "peerDependencies": {
     "graphql": "^16.0.0"
