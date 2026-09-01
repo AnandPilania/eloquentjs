@@ -645,9 +645,17 @@ class HasManyThrough extends Relation {
     _joined(qb) {
         const related = this._Related.getTable()
         const through = this._Through.getTable()
-        return qb
-            .select(`${related}.*`)
+        qb.select(`${related}.*`)
             .join(through, `${through}.${this._throughKey}`, '=', `${related}.${this._secondKey}`)
+
+        // The through table is joined directly (never via Through.query()), so its
+        // own soft-delete scope is never applied automatically — a deleted "through"
+        // row (e.g. a removed User) would otherwise still bridge to its related rows.
+        if (this._Through.softDeletes) {
+            qb.whereNull(`${through}.${this._Through.deletedAtColumn}`)
+        }
+
+        return qb
     }
 
     _baseQuery() {

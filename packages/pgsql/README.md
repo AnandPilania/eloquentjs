@@ -146,48 +146,6 @@ await User.whereRaw('LOWER(email) = ?', ['alice@example.com']).first()
 await User.selectRaw('count(*) as total, country').groupBy('country').get()
 ```
 
-```js
-import { Schema } from '@eloquentjs/core'
-
-// CREATE TABLE
-await Schema.create('users', t => {
-  t.id()                                         // SERIAL PRIMARY KEY
-  t.uuid('uuid').unique()                        // UUID column
-  t.string('name')                               // VARCHAR(255)
-  t.string('email', 191).unique()                // VARCHAR(191) UNIQUE
-  t.text('bio').nullable()
-  t.integer('age').nullable()
-  t.bigInteger('score').default(0)
-  t.decimal('price', 8, 2).default(0)
-  t.boolean('is_active').default(true)
-  t.json('settings').nullable()
-  t.jsonb('meta').nullable()
-  t.date('born_at').nullable()
-  t.timestamp('email_verified_at').nullable()
-  t.timestamps()                                 // created_at + updated_at
-  t.softDeletes()                                // deleted_at
-  t.foreignId('user_id').constrained('users').cascadeOnDelete()
-  t.index(['name', 'email'])
-  t.unique(['email', 'tenant_id'])
-})
-
-// ALTER TABLE
-await Schema.table('users', t => {
-  t.string('avatar_url').nullable()
-  t.dropColumn('old_field')
-  t.index('email')
-})
-
-// Other operations
-await Schema.dropIfExists('old_table')
-await Schema.rename('old_name', 'new_name')
-await Schema.hasTable('users')                   // → true/false
-await Schema.hasColumn('users', 'email')         // → true/false
-await Schema.getColumnListing('users')           // → ['id', 'name', ...]
-```
-
----
-
 ---
 
 ## Schema Builder

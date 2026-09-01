@@ -291,9 +291,11 @@ export class Model {
             }
         }
 
-        // Auto soft-delete filter
+        // Auto soft-delete filter. Qualified with the table name: relations like
+        // HasManyThrough join another table that may itself have a deleted_at
+        // column, and an unqualified column here would be ambiguous in that join.
         if (this.softDeletes) {
-            qb._wheres.push({ type: 'null', column: this.deletedAtColumn, boolean: 'and', _scope: '_softDelete' })
+            qb._wheres.push({ type: 'null', column: `${this.getTable()}.${this.deletedAtColumn}`, boolean: 'and', _scope: '_softDelete' })
         }
 
         // Default eager loads

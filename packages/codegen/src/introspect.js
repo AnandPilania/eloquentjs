@@ -316,8 +316,14 @@ function buildFields({
   // Explicitly declared columns
   for (const [fieldName, cast] of Object.entries(columns)) add(fieldName, cast)
 
-  // Fillable columns with no declared type default to string
-  for (const fieldName of fill) add(fieldName, undefined)
+  // Fillable columns with no declared cast default to string — except a
+  // `*_id` foreign key, which holds the same kind of value as the primary
+  // key it points to (an integer, or a uuid if the app casts it explicitly)
+  // and should generate as ID, not String, for the same reason the PK does.
+  for (const fieldName of fill) {
+    const isForeignKey = fieldName !== pk && fieldName.endsWith('_id')
+    add(fieldName, undefined, isForeignKey ? { cast: 'integer', ...CAST_TYPE_MAP.integer, gqlType: 'ID' } : {})
+  }
 
   // Timestamps (always present unless disabled)
   if (timestamps) {

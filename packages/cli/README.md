@@ -262,7 +262,7 @@ export default class PostSeeder extends Seeder {
 // database/factories/PostFactory.js
 import { Factory } from '@eloquentjs/core'
 import { faker } from '@faker-js/faker'
-import Post from '../models/Post.js'
+import Post from '../../app/models/Post.js'
 
 export default class PostFactory extends Factory {
   model = Post

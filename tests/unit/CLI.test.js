@@ -406,7 +406,7 @@ describe('make:model generated content', () => {
     const writes = await runMakeModel(['make:model', 'Tag', '--factory'])
     const factoryWrite = writes.find(w => w.path.includes('TagFactory.js'))
     expect(factoryWrite).toBeDefined()
-    expect(factoryWrite.content).toContain("import Tag from '../models/Tag.js'")
+    expect(factoryWrite.content).toContain("import Tag from '../../app/models/Tag.js'")
     expect(factoryWrite.content).toContain('class TagFactory extends Factory')
   })
 
@@ -573,7 +573,8 @@ describe('make:factory', () => {
     const { cmdMakeFactory } = await import('../../packages/cli/src/commands/make-factory.js')
     await cmdMakeFactory({ cwd: '/project', config: null, flags: {}, positional: ['Post'] })
     const w = capturedWrites[0]
-    expect(w.content).toContain("import Post from '../models/Post.js'")
+    // default paths: factories: 'database/factories', models: 'app/models'
+    expect(w.content).toContain("import Post from '../../app/models/Post.js'")
     expect(w.content).toContain('model = Post')
   })
 

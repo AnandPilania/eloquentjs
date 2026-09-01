@@ -65,7 +65,7 @@ if (await validator.failsAsync()) {
 ### 3. Named rule functions
 
 ```js
-import { required, email, min, max, unique, exists } from '@eloquentjs/validator/rules'
+import { required, string, email, min, max, unique, inList } from '@eloquentjs/validator/rules'
 
 const rules = {
   name:  [required(), string(), min(2), max(100)],

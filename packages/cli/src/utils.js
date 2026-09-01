@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'fs'
-import { dirname, join } from 'path'
+import { dirname, join, relative, sep } from 'path'
 import { pathToFileURL } from 'url'
 import { createRequire } from 'module'
 
@@ -105,6 +105,15 @@ export function resolveConfig(ctx) {
     }
 }
 
+// ─── Relative import path between two configured paths ─────────────────────
+// Config paths (models/factories/seeders) aren't necessarily siblings
+// (e.g. models: 'app/models', factories: 'database/factories'), so the
+// import specifier between them must be computed, not assumed to be '../x'.
+export function relativeImportPath(fromDir, toDir) {
+    const rel = relative(fromDir, toDir).split(sep).join('/')
+    return rel.startsWith('.') ? rel : `./${rel}`
+}
+
 export function normalizeDriver(driver = 'pgsql') {
     const name = String(driver).toLowerCase()
     const aliases = {
@@ -151,9 +160,9 @@ export async function loadConnection(ctx) {
 
     // Keep the driver import isolated from connect() below so a failed DB
     // connection is never misreported as a missing module.
-    let connect
+    let connect, disconnect
     try {
-        ({ connect } = await import(specifier))
+        ({ connect, disconnect } = await import(specifier))
     } catch (err) {
         if (err.code === 'ERR_MODULE_NOT_FOUND') {
             // ERR_MODULE_NOT_FOUND fires both when the driver itself is absent and
@@ -173,7 +182,31 @@ export async function loadConnection(ctx) {
         throw err
     }
 
-    return connect(cfg.connection)
+    // `driver` picks which driver package to load — it isn't a connection
+    // option for any of them. pg/better-sqlite3 silently ignore an unknown
+    // key, but MongoClient validates its options strictly and throws
+    // "option driver is not supported" if it's forwarded.
+    const { driver: _driver, ...connectionOptions } = cfg.connection ?? {}
+    const result = await connect(connectionOptions)
+
+    // The CLI is a one-shot process — `bin/eloquent.js` never calls
+    // process.exit(), it just lets the event loop drain — so whichever
+    // driver connected here needs to be disconnected before the command
+    // returns. pg's pool and better-sqlite3's handle both let Node exit on
+    // their own, but MongoClient's connection pool sockets don't, so any
+    // mongodb command (db:seed, in particular) hung forever without this.
+    _lastConnectedDriver = disconnect ?? null
+
+    return result
+}
+
+let _lastConnectedDriver = null
+
+/** Disconnect whichever driver loadConnection() last connected, if any. */
+export async function disconnectLoadedDriver() {
+    const disconnect = _lastConnectedDriver
+    _lastConnectedDriver = null
+    if (disconnect) await disconnect()
 }
 
 // ─── Migration file scanner ─────────────────────────────────────────────────

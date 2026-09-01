@@ -14,7 +14,13 @@ npm install @eloquentjs/core @eloquentjs/realtime
 import { createRealtimeServer } from '@eloquentjs/realtime'
 import { User, Post, Comment } from './models/index.js'
 
-const rt = createRealtimeServer({ port: 6001 })
+// appKey/appSecret are required — there is no default, so a forgotten
+// production secret can't ship silently. Generate your own random values.
+const rt = createRealtimeServer({
+  port:      6001,
+  appKey:    process.env.REALTIME_APP_KEY,
+  appSecret: process.env.REALTIME_APP_SECRET,
+})
 
 // Auto-broadcast model lifecycle events
 rt.broadcastFrom(User)     // User:created, User:updated, User:deleted → channel "users"
@@ -129,7 +135,9 @@ The client reconnects automatically with exponential backoff (1s → 2s → 4s �
 Always call `close()` when shutting down to clear the ping timer and close all connections:
 
 ```js
-const rt = createRealtimeServer({ port: 6001 })
+const rt = createRealtimeServer({
+  port: 6001, appKey: process.env.REALTIME_APP_KEY, appSecret: process.env.REALTIME_APP_SECRET,
+})
 
 // On graceful shutdown
 process.on('SIGTERM', async () => {
@@ -155,7 +163,7 @@ window.Pusher = Pusher
 
 const echo = new Echo({
   broadcaster: 'pusher',
-  key: 'default-key',
+  key: 'the same appKey passed to createRealtimeServer()',
   wsHost: 'localhost',
   wsPort: 6001,
   forceTLS: false,
@@ -177,8 +185,8 @@ echo.channel('users')
 | `port` | `6001` | Port to listen on (ignored if `server` provided) |
 | `server` | `null` | Attach to an existing `http.Server` |
 | `appId` | `'eloquentjs'` | App identifier |
-| `appKey` | `'default-key'` | Public app key |
-| `appSecret` | `'default-secret'` | Secret for signing auth tokens |
+| `appKey` | *(required)* | Public app key — no default; the constructor throws if omitted |
+| `appSecret` | *(required)* | Secret for signing auth tokens — no default; the constructor throws if omitted |
 | `authEndpoint` | `'/broadcasting/auth'` | Auth endpoint path |
 | `pingInterval` | `30000` | WebSocket ping interval (ms) |
 

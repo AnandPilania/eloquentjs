@@ -78,6 +78,18 @@ describe('schema generation', () => {
     const { typeDefs } = buildSchema([Post])
     expect(typeDefs).not.toContain('secret')
   })
+
+  // Category.posts() relates to Post, but building the schema for just
+  // [Category] (a subset, like the README's own `buildSchema([User, Post,
+  // Comment])` example) used to still emit `posts: [Post!]` with no `type
+  // Post` anywhere in the document — invalid SDL that makeExecutableSchema /
+  // buildSchema (graphql-js) reject outright.
+  test('a relation to a model outside the passed set is dropped, not left dangling', async () => {
+    const { buildSchema: buildGraphQLSchema } = await import('graphql')
+    const { typeDefs } = buildSchema([Category])
+    expect(typeDefs).not.toMatch(/posts:\s*\[Post!\]/)
+    expect(() => buildGraphQLSchema(typeDefs)).not.toThrow()
+  })
 })
 
 describe('relation resolvers', () => {

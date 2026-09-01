@@ -208,7 +208,7 @@ describe('nested resources are reachable', () => {
     await call(apiRouter([resource(Comment)]), { path: '/comments/trashed' })
     const ctx = resolver.calls.selects.at(-1).ctx
     expect(ctx.wheres).toEqual(
-      expect.arrayContaining([expect.objectContaining({ type: 'notNull', column: 'deleted_at' })]),
+      expect.arrayContaining([expect.objectContaining({ type: 'notNull', column: 'comments.deleted_at' })]),
     )
   })
 })

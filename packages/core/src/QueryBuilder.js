@@ -414,14 +414,14 @@ export class QueryBuilder {
 
   onlyTrashed() {
     this._removeDeletedAtScope()
-    this._wheres.push({ type: 'notNull', column: this._model.deletedAtColumn, boolean: 'and' })
+    this._wheres.push({ type: 'notNull', column: `${this._model.getTable()}.${this._model.deletedAtColumn}`, boolean: 'and' })
     return this
   }
 
   _removeDeletedAtScope() {
     const col = this._model.deletedAtColumn
     this._wheres = this._wheres.filter(w =>
-      !(w.type === 'null' && w.column === col)
+      !(w.type === 'null' && (w.column === col || w.column === `${this._model.getTable()}.${col}`))
     )
   }
 

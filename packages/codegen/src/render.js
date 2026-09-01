@@ -34,15 +34,20 @@ export async function loadModelsFromDir(modelsDir) {
   if (!existsSync(modelsDir)) return []
 
   const files = readdirSync(modelsDir)
-    .filter(f => f.endsWith('.js') && !f.startsWith('_') && !f.startsWith('.'))
+    .filter(f => f.endsWith('.js') && !f.startsWith('_') && !f.startsWith('.')
+      // A barrel file (re-exporting every model as a named export) has no
+      // `default` export, so the fallback below would grab an arbitrary one
+      // of its exports — silently dropping every other model and duplicating
+      // whichever export happens to sort first. Skip the common convention.
+      && f !== 'index.js' && f !== 'index.mjs')
 
-  const models = []
+  const models = new Set()
   for (const file of files) {
     try {
       const mod = await import(pathToFileURL(join(modelsDir, file)).href)
       const ModelClass = mod.default ?? Object.values(mod).find(v => typeof v === 'function')
       if (ModelClass && typeof ModelClass === 'function') {
-        models.push(ModelClass)
+        models.add(ModelClass)
       }
     } catch (err) {
       // Skip files that fail to import (may have missing dependencies)
@@ -50,7 +55,7 @@ export async function loadModelsFromDir(modelsDir) {
     }
   }
 
-  return models
+  return [...models]
 }
 
 /**

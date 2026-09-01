@@ -76,6 +76,27 @@ describe('Where type translation', () => {
   test('no wheres means an empty filter', async () => {
     expect(await filterFor({ wheres: [] })).toEqual({})
   })
+
+  // Model.query()'s soft-delete scope qualifies the column with the model's
+  // table ("users.deleted_at"), so the filter stays unambiguous across a SQL
+  // join. Mongo has no joins and reads a dot as a *nested* field path — left
+  // unqualified, "users.deleted_at" filtered a sub-document that never
+  // exists, which silently matched everything (including soft-deleted rows)
+  // instead of the real top-level `deleted_at` field.
+  test('a column qualified with this collection\'s own table name is unwrapped', async () => {
+    expect(await filterFor({ wheres: [{ type: 'null', column: 'users.deleted_at', boolean: 'and' }] }))
+      .toEqual({ deleted_at: { $eq: null } })
+  })
+
+  test('a genuine nested-field path is left alone', async () => {
+    expect(await filterFor({ wheres: [{ column: 'address.city', operator: '=', value: 'NYC', boolean: 'and' }] }))
+      .toEqual({ 'address.city': { $eq: 'NYC' } })
+  })
+
+  test('"table.id" unwraps to _id, not just "id"', async () => {
+    expect(await filterFor({ wheres: [{ column: 'users.id', operator: '=', value: '1', boolean: 'and' }] }))
+      .toEqual({ _id: { $eq: '1' } })
+  })
 })
 
 describe('_id primary-key lookups', () => {

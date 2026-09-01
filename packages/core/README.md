@@ -756,7 +756,9 @@ that hasn't declared `fillable`.
 
 ```bash
 npm install --save-dev @faker-js/faker
+```
 
+```js
 // Seeder
 class DatabaseSeeder extends Seeder {
   async run() {

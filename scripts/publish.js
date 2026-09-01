@@ -26,6 +26,7 @@ const PUBLISH_ORDER = [
     { name: '@eloquentjs/codegen', dir: 'packages/codegen' },
     { name: '@eloquentjs/validator', dir: 'packages/validator' },
     { name: '@eloquentjs/pgsql', dir: 'packages/pgsql' },
+    { name: '@eloquentjs/mysql', dir: 'packages/mysql' },
     { name: '@eloquentjs/sqlite', dir: 'packages/sqlite' },
     { name: '@eloquentjs/mongodb', dir: 'packages/mongodb' },
     { name: '@eloquentjs/realtime', dir: 'packages/realtime' },

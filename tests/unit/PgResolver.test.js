@@ -543,3 +543,29 @@ describe('Column DEFAULT rendering', () => {
     expect(await ddl({ _default: false })).toContain('DEFAULT FALSE')
   })
 })
+
+// ─── Primary key on auto-increment columns ───────────────────────────────────
+// BIGSERIAL/SERIAL only creates the sequence default — unlike SQLite's
+// INTEGER PRIMARY KEY AUTOINCREMENT, Postgres still needs an explicit PRIMARY
+// KEY. Schema.create('x', t => t.id()) — the first line of nearly every
+// migration — used to render `"id" BIGSERIAL` with no constraint at all, so
+// the table had no primary key and any `constrained('x')` FK pointing at it
+// failed with "no unique constraint matching given keys".
+describe('t.id() / bigIncrements() / increments() get an actual PRIMARY KEY', () => {
+  const ddl = async (col) => {
+    const seen = []
+    const r = new PgResolver({ query: async (sql) => { seen.push(sql); return { rows: [] } } })
+    await r.createTable('t', { columns: [{ name: 'id', primaryKey: true, ...col }], foreigns: [], indexes: [] })
+    return seen.join('\n')
+  }
+
+  test('t.id() → BIGSERIAL PRIMARY KEY', async () => {
+    const sql = await ddl({ type: 'bigIncrements' })
+    expect(sql).toContain('"id" BIGSERIAL PRIMARY KEY')
+  })
+
+  test('t.increments() → SERIAL PRIMARY KEY', async () => {
+    const sql = await ddl({ type: 'increments' })
+    expect(sql).toContain('"id" SERIAL PRIMARY KEY')
+  })
+})

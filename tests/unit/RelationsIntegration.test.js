@@ -217,6 +217,48 @@ describeIf('Relations (real SQL)', () => {
     expect(countries[0].posts[0].getAttributes()).not.toHaveProperty('_parent_id')
   })
 
+  test('hasManyThrough resolves deleted_at against the right table when both sides soft-delete', async () => {
+    db.exec(`
+      ALTER TABLE users ADD COLUMN deleted_at TEXT;
+      ALTER TABLE posts ADD COLUMN deleted_at TEXT;
+    `)
+
+    class SoftUser extends Model {
+      static table = 'users'
+      static fillable = ['name', 'country_id']
+      static timestamps = false
+      static softDeletes = true
+      posts() { return this.hasMany(SoftPost, 'user_id') }
+    }
+    class SoftPost extends Model {
+      static table = 'posts'
+      static fillable = ['user_id', 'title', 'published']
+      static timestamps = false
+      static softDeletes = true
+    }
+    class SoftCountry extends Model {
+      static table = 'countries'
+      static fillable = ['name']
+      static timestamps = false
+      posts() { return this.hasManyThrough(SoftPost, SoftUser, 'country_id', 'user_id') }
+    }
+
+    const uk = await SoftCountry.create({ name: 'UK' })
+    const alice = await SoftUser.create({ name: 'Alice', country_id: uk.id })
+    const bob = await SoftUser.create({ name: 'Bob', country_id: uk.id })
+    await alice.posts().create({ title: 'Alive' })
+    const trashedPost = await alice.posts().create({ title: 'Trashed post' })
+    await bob.posts().create({ title: 'Orphaned by trashed user' })
+
+    await trashedPost.delete()
+    await bob.delete()
+
+    // A naive unqualified `deleted_at IS NULL` is ambiguous across the join
+    // and (in sqlite) silently binds to one side, either leaking rows the
+    // other side's soft-delete should have hidden or hiding ones it shouldn't.
+    expect(titles(await uk.posts().get())).toEqual(['Alive'])
+  })
+
   // ── polymorphic ────────────────────────────────────────────────────────────
   test('morphMany/morphTo use the morph map alias, not the class name', async () => {
     const alice = await User.create({ name: 'Alice' })

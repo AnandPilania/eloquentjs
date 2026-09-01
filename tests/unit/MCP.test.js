@@ -479,6 +479,38 @@ describe('handleNlpQuery', () => {
     const result = await handleNlpQuery({ query: 'get all User records', execute: false }, emptyCtx)
     expect(result.executed).toBeUndefined()
   })
+
+  // The README's own `nlp_query` examples are all-lowercase, plural nouns —
+  // "get the 10 most recent active users with their posts", "find posts
+  // created today ordered by title" — never a capitalized singular model
+  // name. Matching only `/\b([A-Z][a-zA-Z]+)\b/` in the raw text means every
+  // documented example failed to parse a model at all.
+  describe('lowercase plural model names, as used in every README example', () => {
+    beforeEach(() => {
+      mockFs.existsSync.mockReturnValue(true)
+      mockFs.readdirSync.mockReturnValue(['User.js', 'Post.js', 'Comment.js', 'index.js'])
+    })
+    afterEach(() => {
+      mockFs.existsSync.mockReturnValue(false)
+      mockFs.readdirSync.mockReturnValue([])
+    })
+
+    test('resolves a plural noun to its model, exactly like the README examples', async () => {
+      const result = await handleNlpQuery({ query: 'get the 10 most recent active users with their posts' }, emptyCtx)
+      expect(result.parsed.model).toBe('User')
+      expect(result.generatedCode).toContain('User')
+    })
+
+    test('"find posts created today ordered by title" resolves to Post', async () => {
+      const result = await handleNlpQuery({ query: 'find posts created today ordered by title' }, emptyCtx)
+      expect(result.parsed.model).toBe('Post')
+    })
+
+    test('does not mistake the models/index.js barrel for a model name', async () => {
+      const result = await handleNlpQuery({ query: 'count all comments' }, emptyCtx)
+      expect(result.parsed.model).toBe('Comment')
+    })
+  })
 })
 
 // ─────────────────────────────────────────────────────────────────────────────

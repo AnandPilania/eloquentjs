@@ -187,6 +187,34 @@ describe('introspect — live Model class', () => {
     expect(names).toEqual(expect.arrayContaining(['id', 'name', 'email']))
   })
 
+  test('an uncast `*_id` fillable column defaults to ID, like the primary key', () => {
+    // Every other fillable column with no cast defaults to String, but a
+    // foreign key holds the same kind of value as the primary key it points
+    // to — typing it String produced a GraphQL schema that rejected the
+    // numeric id it actually receives.
+    class Post {
+      static table = 'posts'
+      static fillable = ['title', 'user_id']
+      static timestamps = false
+    }
+    const fields = introspect(Post).fields
+    const userId = fields.find(f => f.name === 'user_id')
+    expect(userId.gqlType).toBe('ID')
+    expect(userId.tsType).toBe('number')
+    expect(fields.find(f => f.name === 'title').gqlType).toBe('String')
+  })
+
+  test('an explicit cast on a `*_id` column is not overridden', () => {
+    class Post {
+      static table = 'posts'
+      static fillable = ['user_id']
+      static casts = { user_id: 'string' }
+      static timestamps = false
+    }
+    const userId = introspect(Post).fields.find(f => f.name === 'user_id')
+    expect(userId.gqlType).toBe('String')
+  })
+
   test('graphql.fields does not un-hide `hidden` columns', () => {
     class Secretive {
       static table = 'secretives'
@@ -523,6 +551,19 @@ describe('generateGraphqlSchema', () => {
   test('no header when header=false', () => {
     const noHeader = generateGraphqlSchema(schemas, { header: false })
     expect(noHeader).not.toContain('# Auto-generated')
+  })
+
+  // User declares `profile() { return this.hasOne('Profile') }`, but Profile
+  // isn't one of the models passed to generateGraphqlSchema([User, Post]) —
+  // exactly the "generate SDL for a subset of an app's models" case the
+  // README's own `buildSchema([User, Post, Comment])` example demonstrates.
+  // A relation field unconditionally typed `profile: Profile` with no
+  // `type Profile` anywhere in the document is invalid SDL: buildSchema()
+  // (graphql-js) rejects the whole document with "Unknown type Profile".
+  test('a relation to a model outside the generated set is dropped, not left dangling', async () => {
+    const { buildSchema: buildGraphQLSchema } = await import('graphql')
+    expect(sdl).not.toMatch(/profile:\s*Profile\b/)
+    expect(() => buildGraphQLSchema(sdl)).not.toThrow()
   })
 
   test('custom scalars are included', () => {

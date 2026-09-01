@@ -1,0 +1,5 @@
+database.sqlite
+schema.graphql
+openapi.json
+src/types/
+node_modules/

@@ -5,6 +5,10 @@
  * and translate natural language into QueryBuilder chains or CRUD operations.
  */
 
+import { existsSync, readdirSync } from 'fs'
+import { resolve } from 'path'
+import { toSnakePlural } from '@eloquentjs/core'
+
 // ─── Knowledge base ───────────────────────────────────────────────────────────
 // Embedded docs so the tool works without internet access.
 
@@ -585,13 +589,44 @@ const users = await UserFactory.new().count(20).create()`,
 
 // ─── NLP parser helpers ───────────────────────────────────────────────────────
 
-function parseNlpQuery(text) {
+// Model file names in the project, so a lowercase plural noun in the query
+// ("users", "posts" — every README example for this tool is phrased this
+// way) can resolve to the actual model name instead of requiring the caller
+// to capitalize it.
+function listKnownModelNames(ctx) {
+  try {
+    const dir = resolve(ctx.cwd, ctx.config?.paths?.models ?? 'app/models')
+    if (!existsSync(dir)) return []
+    return readdirSync(dir)
+      .filter(f => f.endsWith('.js') && f !== 'index.js')
+      .map(f => f.slice(0, -3))
+  } catch {
+    return []
+  }
+}
+
+function parseNlpQuery(text, knownModels = []) {
   const t = text.toLowerCase()
   const result = { model: null, conditions: [], orderBy: null, limit: null, with: [], aggregate: null }
 
-  // Extract model name
-  const modelMatch = text.match(/\b([A-Z][a-zA-Z]+)\b/)
-  if (modelMatch) result.model = modelMatch[1]
+  // Extract model name — prefer an actual model from the project, matched by
+  // its plural or singular form as a whole word, so "posts"/"post" both
+  // resolve to "Post". Longest name first, so "Comment" doesn't shadow a
+  // "Comments" match inside a longer compound name.
+  const byLength = [...knownModels].sort((a, b) => b.length - a.length)
+  for (const name of byLength) {
+    const forms = [toSnakePlural(name), name.toLowerCase()]
+    if (forms.some(f => new RegExp(`\\b${f}\\b`).test(t))) {
+      result.model = name
+      break
+    }
+  }
+
+  // Fall back to a capitalized word in the original text (e.g. "User", "Post").
+  if (!result.model) {
+    const modelMatch = text.match(/\b([A-Z][a-zA-Z]+)\b/)
+    if (modelMatch) result.model = modelMatch[1]
+  }
 
   // Simple condition patterns
   if (t.includes('active') || t.includes('enabled'))      result.conditions.push({ field: 'active', op: '=', value: true })
@@ -839,7 +874,7 @@ export async function handleGetExamples(args, ctx) {
 }
 
 export async function handleNlpQuery(args, ctx) {
-  const parsed = parseNlpQuery(args.query)
+  const parsed = parseNlpQuery(args.query, listKnownModelNames(ctx))
   const code   = buildQueryCode(parsed)
 
   if (!code || !parsed.model) {

@@ -1,0 +1,32 @@
+{
+  "name": "@eloquentjs/showcase",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Real-world consumer app: wires up every EloquentJS package (cli, mcp, codegen, graphql, realtime, validator, api) against all three drivers (pgsql, sqlite, mongodb), to catch integration bugs and README inconsistencies.",
+  "type": "module",
+  "scripts": {
+    "demo:sqlite": "node src/demo.js sqlite",
+    "demo:pgsql": "node src/demo.js pgsql",
+    "demo:mongodb": "node src/demo.js mongodb",
+    "demo:all": "node src/run-all.js"
+  },
+  "dependencies": {
+    "@eloquentjs/core": ">=0.0.8 <0.1.0",
+    "@eloquentjs/codegen": ">=0.0.8 <0.1.0",
+    "@eloquentjs/graphql": ">=0.0.8 <0.1.0",
+    "@eloquentjs/realtime": ">=0.0.8 <0.1.0",
+    "@eloquentjs/validator": ">=0.0.8 <0.1.0",
+    "@eloquentjs/api": ">=0.0.8 <0.1.0",
+    "@eloquentjs/mcp": ">=0.0.8 <0.1.0",
+    "@eloquentjs/cli": ">=0.0.8 <0.1.0",
+    "@eloquentjs/pgsql": ">=0.0.8 <0.1.0",
+    "@eloquentjs/sqlite": ">=0.0.8 <0.1.0",
+    "@eloquentjs/mongodb": ">=0.0.8 <0.1.0",
+    "graphql": "^16.9.0",
+    "express": "^4.19.2"
+  },
+  "devDependencies": {
+    "@faker-js/faker": "^8.4.1",
+    "better-sqlite3": "^11.10.0"
+  }
+}

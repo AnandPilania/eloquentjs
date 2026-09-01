@@ -1,0 +1,49 @@
+{
+  "name": "@eloquentjs/mysql",
+  "version": "0.0.8",
+  "description": "MySQL driver for EloquentJS",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist-types/index.d.ts",
+      "default": "./src/index.js"
+    }
+  },
+  "dependencies": {
+    "@eloquentjs/core": ">=0.0.8 <0.1.0"
+  },
+  "peerDependencies": {
+    "mysql2": "^3.11.0"
+  },
+  "devDependencies": {
+    "mysql2": "^3.11.0"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Anand Pilania",
+    "email": "pilaniaanand@gmail.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AnandPilania/eloquentjs.git",
+    "directory": "packages/mysql"
+  },
+  "bugs": {
+    "url": "https://github.com/AnandPilania/eloquentjs/issues"
+  },
+  "homepage": "https://github.com/AnandPilania/eloquentjs#readme",
+  "engines": {
+    "node": ">=20.6.0"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "dist-types"
+  ],
+  "types": "dist-types/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepublishOnly": "npm run build"
+  }
+}

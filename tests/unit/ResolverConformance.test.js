@@ -14,11 +14,13 @@ import { describeResolverShape, describeResolverBehavior } from '@eloquentjs/cor
 import { PgResolver } from '../../packages/pgsql/src/index.js'
 import { SQLiteResolver } from '../../packages/sqlite/src/index.js'
 import { MongoResolver } from '../../packages/mongodb/src/index.js'
+import { MySqlResolver } from '../../packages/mysql/src/index.js'
 
 // ─── Shape: every driver, no database ────────────────────────────────────────
 describeResolverShape('PgResolver',     () => new PgResolver({ query: async () => ({ rows: [] }) }))
 describeResolverShape('SQLiteResolver', () => new SQLiteResolver({ prepare: () => ({}) }))
 describeResolverShape('MongoResolver',  () => new MongoResolver({ collection: () => ({}) }))
+describeResolverShape('MySqlResolver',  () => new MySqlResolver({ query: async () => ([{ }]), getConnection: async () => ({}) }))
 
 // ─── Behavior: SQLite for real, via node:sqlite ──────────────────────────────
 let DatabaseSync = null
@@ -49,4 +51,10 @@ describeResolverBehavior('MongoResolver', {
   makeResolver: () => null,   // ponytail: wire to a Db from MONGO_URL in CI
   createTable: async () => {},
   supports: { groups: true, jsonContains: false },
+})
+
+// ─── Behavior: MySQL, only when MYSQL_URL is set ─────────────────────────────
+describeResolverBehavior('MySqlResolver', {
+  makeResolver: () => null,   // ponytail: wire to a mysql2 Pool from MYSQL_URL in CI
+  createTable: async () => {},
 })

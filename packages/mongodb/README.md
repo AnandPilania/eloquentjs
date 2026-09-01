@@ -90,13 +90,15 @@ await User.whereRaw({
 import { connect } from '@eloquentjs/mongodb'
 import { connect as pgConnect } from '@eloquentjs/pgsql'
 
-// Connect both drivers
+// Connect both drivers — the second argument names the connection;
+// `static connection` refers to it by that name, not by the resolver
+// connect() returns.
 await pgConnect({ host: 'localhost', database: 'app' })
-const mongoConn = await connect({ url: 'mongodb://localhost', database: 'analytics' })
+await connect({ url: 'mongodb://localhost', database: 'analytics' }, 'analytics')
 
 // Use MongoDB for specific models
 class PageView extends Model {
-  static connection = mongoConn
+  static connection = 'analytics'
   static table      = 'page_views'
 }
 

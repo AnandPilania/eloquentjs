@@ -46,7 +46,7 @@ function _getDb(connectionName = 'default') {
  * @param {string} connectionName
  * @returns {Promise<MongoResolver>}
  */
-export async function connect({ url, database, ...options } = {}, connectionName = 'default') {
+export async function connect({ url, database, username, password, ...options } = {}, connectionName = 'default') {
     // Close existing connection for this name before replacing it
     if (_clients.has(connectionName)) {
         await _clients.get(connectionName).close().catch(() => { })
@@ -54,7 +54,11 @@ export async function connect({ url, database, ...options } = {}, connectionName
         _dbs.delete(connectionName)
     }
 
-    const client = new MongoClient(url, { ...options })
+    // MongoClientOptions has no top-level `username`/`password` — they must be
+    // nested under `auth`, or the driver rejects them as unrecognized options.
+    const auth = (username || password) ? { username, password } : undefined
+
+    const client = new MongoClient(url, { ...options, ...(auth ? { auth } : {}) })
     await client.connect()
     const db = client.db(database)
 
@@ -175,14 +179,14 @@ export class MongoResolver {
         if (ctx.unions?.length) {
             throw new Error('[EloquentJS] MongoDBResolver does not support union() — SQL UNION has no equivalent find() semantics here.')
         }
-        const filter = buildFilter(ctx)
+        const filter = buildFilter(ctx, table)
         let cursor = this._col(table).find(filter, this._opts)
 
         // Projection
         const selects = ctx.selects ?? ['*']
         if (selects.length && selects[0] !== '*' && !selects[0]?.raw) {
             const proj = {}
-            for (const s of selects) proj[mapColumn(s)] = 1
+            for (const s of selects) proj[mapColumn(s, table)] = 1
             cursor = cursor.project(proj)
         }
 
@@ -192,7 +196,7 @@ export class MongoResolver {
             for (const o of ctx.orderBys) {
                 if (o.random) continue
                 if (o.raw) continue
-                sort[mapColumn(o.column)] = o.direction === 'DESC' ? -1 : 1
+                sort[mapColumn(o.column, table)] = o.direction === 'DESC' ? -1 : 1
             }
             if (Object.keys(sort).length) cursor = cursor.sort(sort)
         }
@@ -228,13 +232,43 @@ export class MongoResolver {
 
     /**
      * @param {string} table
+     * @param {Record<string, any>[]} rows
+     * @param {string|string[]} uniqueBy - conflict key field(s)
+     * @param {string[]|null} update - fields to overwrite on conflict; null = all non-key fields
+     * @returns {Promise<number>} matched + upserted count
+     */
+    async upsert(table, rows, uniqueBy, update = null) {
+        const list = [rows].flat()
+        if (!list.length) return 0
+        const keys = [uniqueBy].flat()
+
+        const ops = list.map(row => {
+            const filter = {}
+            for (const k of keys) filter[mapColumn(k)] = mapColumn(k) === '_id' ? toObjectIdIfValid(row[k]) : row[k]
+
+            const updateCols = update ?? Object.keys(row).filter(c => !keys.includes(c))
+            const $set = Object.fromEntries(
+                updateCols
+                    .filter(c => row[c] !== undefined && c !== '_id' && c !== 'id')
+                    .map(c => [mapColumn(c), row[c]])
+            )
+
+            return { updateOne: { filter, update: { $set }, upsert: true } }
+        })
+
+        const result = await this._col(table).bulkWrite(ops, this._opts)
+        return result.modifiedCount + result.upsertedCount
+    }
+
+    /**
+     * @param {string} table
      * @param {Record<string, any>} conditions
      * @param {Record<string, any>} data
      * @param {any} [ctx]
      * @returns {Promise<number>}
      */
     async update(table, conditions, data, ctx = null) {
-        const filter = ctx ? buildFilter(ctx) : buildSimpleFilter(conditions)
+        const filter = ctx ? buildFilter(ctx, table) : buildSimpleFilter(conditions)
         // Drop undefined values and the immutable key — Mongo rejects $set on _id,
         // and `id` is only ever a read-side alias of it.
         const $set = Object.fromEntries(
@@ -252,7 +286,7 @@ export class MongoResolver {
      * @returns {Promise<number>}
      */
     async delete(table, conditions, ctx = null) {
-        const filter = ctx ? buildFilter(ctx) : buildSimpleFilter(conditions)
+        const filter = ctx ? buildFilter(ctx, table) : buildSimpleFilter(conditions)
         const result = await this._col(table).deleteMany(filter, this._opts)
         return result.deletedCount
     }
@@ -265,8 +299,8 @@ export class MongoResolver {
      * @returns {Promise<number | null>}
      */
     async aggregate(table, fn, column, ctx) {
-        const match = buildFilter(ctx)
-        const field = `$${mapColumn(column)}`
+        const match = buildFilter(ctx, table)
+        const field = `$${mapColumn(column, table)}`
         const aggMap = {
             count: { $sum: 1 },
             sum: { $sum: field },
@@ -303,8 +337,8 @@ export class MongoResolver {
     }
 
     async increment(table, column, amount, extra, ctx) {
-        const filter = buildFilter(ctx)
-        const update = { $inc: { [mapColumn(column)]: amount } }
+        const filter = buildFilter(ctx, table)
+        const update = { $inc: { [mapColumn(column, table)]: amount } }
         if (extra && Object.keys(extra).length) update.$set = extra
         const result = await this._col(table).updateMany(filter, update, this._opts)
         return result.modifiedCount
@@ -344,7 +378,7 @@ export class MongoResolver {
     }
 
     async toSQL(table, ctx) {
-        return { collection: table, filter: buildFilter(ctx) }
+        return { collection: table, filter: buildFilter(ctx, table) }
     }
 
     /** @param {string} table */
@@ -410,18 +444,18 @@ export class MongoResolver {
 }
 
 // ─── Filter builder ──────────────────────────────────────────────────────────
-function buildFilter(ctx) {
-    return combineWheres(ctx?.wheres ?? [])
+function buildFilter(ctx, table) {
+    return combineWheres(ctx?.wheres ?? [], table)
 }
 
 /**
  * OR splits the list into runs; each run is AND-ed internally. Mirrors the SQL
  * drivers' precedence so `a OR b AND c` means `a OR (b AND c)` everywhere.
  */
-function combineWheres(wheres) {
+function combineWheres(wheres, table) {
     const runs = []
     for (const w of wheres) {
-        const cond = buildWhereCondition(w)
+        const cond = buildWhereCondition(w, table)
         if (!cond) continue
         if (w.boolean === 'or' || !runs.length) runs.push([cond])
         else runs[runs.length - 1].push(cond)
@@ -432,16 +466,16 @@ function combineWheres(wheres) {
     return { $or: parts }
 }
 
-function buildWhereCondition(w) {
-    const col = mapColumn(w.column)
+function buildWhereCondition(w, table) {
+    const col = mapColumn(w.column, table)
 
     switch (w.type) {
         case 'group': {
-            const sub = combineWheres(w.wheres ?? [])
+            const sub = combineWheres(w.wheres ?? [], table)
             return Object.keys(sub).length ? sub : null
         }
         case 'not': {
-            const sub = combineWheres(w.wheres ?? [])
+            const sub = combineWheres(w.wheres ?? [], table)
             return Object.keys(sub).length ? { $nor: [sub] } : null
         }
         case 'in': return { [col]: { $in: normalizeIdValue(col, w.values ?? []) } }
@@ -452,7 +486,7 @@ function buildWhereCondition(w) {
         // Two ranges on one field must be OR-ed; `{$lt, $gt}` is an AND and
         // therefore unsatisfiable for any min <= max.
         case 'notBetween': return { $or: [{ [col]: { $lt: w.min } }, { [col]: { $gt: w.max } }] }
-        case 'column': return { $expr: { [EXPR_OP[w.operator?.toUpperCase() ?? '='] ?? '$eq']: [`$${mapColumn(w.first)}`, `$${mapColumn(w.second)}`] } }
+        case 'column': return { $expr: { [EXPR_OP[w.operator?.toUpperCase() ?? '='] ?? '$eq']: [`$${mapColumn(w.first, table)}`, `$${mapColumn(w.second, table)}`] } }
         case 'jsonContains': return { [col]: Array.isArray(w.value) ? { $all: w.value } : w.value }
         default: {
             const opMap = {
@@ -494,11 +528,18 @@ function likeToRegExp(value) {
  * `id` is the alias; `_id` is the storage. Every filter/sort/projection path
  * goes through here so the default `Model.primaryKey = 'id'` works.
  */
-function mapColumn(column) {
-    if (column === 'id') return '_id'
+function mapColumn(column, table) {
     if (typeof column !== 'string') return column
-    // 'users.id' → 'users._id' is meaningless in Mongo; strip a table prefix.
-    return column
+    // A table-qualified column (Model.query()'s soft-delete scope emits
+    // "posts.deleted_at" so it stays unambiguous across a SQL join) is
+    // meaningless in Mongo — there's no join, and left as-is Mongo reads the
+    // dot as a *nested* field path ("posts" sub-document that never exists),
+    // silently turning the filter into a no-op instead of matching the real
+    // top-level field. Only strip the prefix when it's this collection's own
+    // name, so a genuine nested-field query (`where('address.city', ...)`,
+    // which the README documents as supported) is untouched.
+    const unqualified = (table && column.startsWith(`${table}.`)) ? column.slice(table.length + 1) : column
+    return unqualified === 'id' ? '_id' : unqualified
 }
 
 // Mongo's `_id` is stored as ObjectId, but the primary-key lookup path

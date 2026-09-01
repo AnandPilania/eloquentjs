@@ -214,6 +214,41 @@ export class PgResolver {
         return result.rows
     }
 
+    // ── UPSERT ───────────────────────────────────────────────────────────────────
+    /**
+     * @param {string} table
+     * @param {object[]} rows
+     * @param {string|string[]} uniqueBy - conflict key column(s), must be covered by a UNIQUE/PRIMARY constraint
+     * @param {string[]|null} update - columns to overwrite on conflict; null = all non-key columns
+     */
+    async upsert(table, rows, uniqueBy, update = null) {
+        const list = [rows].flat()
+        if (!list.length) return 0
+        const keys = [uniqueBy].flat()
+
+        const cols = [...new Set(list.flatMap(r => Object.keys(r).filter(k => r[k] !== undefined)))]
+        const updateCols = (update ?? cols.filter(c => !keys.includes(c)))
+
+        const params = []
+        const tuples = list.map(r =>
+            `(${cols.map(c => { params.push(r[c] ?? null); return `$${params.length}` }).join(', ')})`
+        )
+
+        const conflictCols = keys.map(quoteIdent).join(', ')
+        let sql = `INSERT INTO ${quoteIdent(table)} (${cols.map(quoteIdent).join(', ')}) VALUES ${tuples.join(', ')} `
+            + `ON CONFLICT (${conflictCols}) DO `
+
+        if (updateCols.length) {
+            const sets = updateCols.map(c => `${quoteIdent(c)} = EXCLUDED.${quoteIdent(c)}`).join(', ')
+            sql += `UPDATE SET ${sets}`
+        } else {
+            sql += 'NOTHING'
+        }
+
+        const result = await this.pool.query(sql, params)
+        return result.rowCount
+    }
+
     // ── UPDATE ──────────────────────────────────────────────────────────────────
     /**
      * @param {string}  table
@@ -780,7 +815,11 @@ function colTypeSQL(col) {
 function colToSQL(col) {
     let def = `${quoteIdent(col.name)} ${colTypeSQL(col)}`
 
-    if (col.primaryKey && !['bigIncrements', 'increments'].includes(col.type)) {
+    // BIGSERIAL/SERIAL only creates the auto-increment sequence — unlike
+    // SQLite's INTEGER PRIMARY KEY AUTOINCREMENT, Postgres still needs an
+    // explicit PRIMARY KEY or the column (and every FK referencing it, per
+    // `constrained()`) has no actual constraint at all.
+    if (col.primaryKey) {
         def += ' PRIMARY KEY'
     }
 

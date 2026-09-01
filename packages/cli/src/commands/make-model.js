@@ -2,7 +2,7 @@ import { resolve } from 'path'
 import {
   colors, success, error,
   toPascalCase, toSnakeCase, toTableName, migrationTimestamp,
-  resolveConfig, writeFile,
+  resolveConfig, writeFile, relativeImportPath,
 } from '../utils.js'
 
 export async function cmdMakeModel(ctx) {
@@ -60,12 +60,14 @@ export async function cmdMakeModel(ctx) {
   }
 
   if (flags.factory || flags.all || flags.a) {
-    if (writeFile(resolve(cwd, cfg.paths.factories, `${name}Factory.js`), gfact(schema, { modelsPath: '../models' }), { overwrite: flags.force || flags.f }))
+    const modelsPath = relativeImportPath(resolve(cwd, cfg.paths.factories), resolve(cwd, cfg.paths.models))
+    if (writeFile(resolve(cwd, cfg.paths.factories, `${name}Factory.js`), gfact({ ...schema, modelsPath }, { modelsPath }), { overwrite: flags.force || flags.f }))
       success(`Factory created: ${cfg.paths.factories}/${name}Factory.js`)
   }
 
   if (flags.seed || flags.seeder || flags.all || flags.a) {
-    if (writeFile(resolve(cwd, cfg.paths.seeders, `${name}Seeder.js`), gseed(schema, { factoriesPath: '../factories' }), { overwrite: flags.force || flags.f }))
+    const factoriesPath = relativeImportPath(resolve(cwd, cfg.paths.seeders), resolve(cwd, cfg.paths.factories))
+    if (writeFile(resolve(cwd, cfg.paths.seeders, `${name}Seeder.js`), gseed(schema, { factoriesPath }), { overwrite: flags.force || flags.f }))
       success(`Seeder created: ${cfg.paths.seeders}/${name}Seeder.js`)
   }
 }
@@ -82,8 +84,8 @@ function inlineMigration(name, { table, softDeletes, timestamps }) {
   const ts = timestamps !== false ? '\n      t.timestamps()' : ''
   return `import { Migration, Schema } from '@eloquentjs/core'\n\nexport default class ${cn} extends Migration {\n  async up() {\n    await Schema.create('${table}', t => {\n      t.id()\n      // t.string('name')${ts}${sd}\n    })\n  }\n  async down() { await Schema.dropIfExists('${table}') }\n}\n`
 }
-function inlineFactory({ name }) {
-  return `import { Factory } from '@eloquentjs/core'\nimport { faker } from '@faker-js/faker'\nimport ${name} from '../models/${name}.js'\n\nexport default class ${name}Factory extends Factory {\n  model = ${name}\n  definition() { return { /* name: faker.person.fullName() */ } }\n}\n`
+function inlineFactory({ name, modelsPath = '../models' }) {
+  return `import { Factory } from '@eloquentjs/core'\nimport { faker } from '@faker-js/faker'\nimport ${name} from '${modelsPath}/${name}.js'\n\nexport default class ${name}Factory extends Factory {\n  model = ${name}\n  definition() { return { /* name: faker.person.fullName() */ } }\n}\n`
 }
 function inlineSeeder({ name }) {
   return `import { Seeder } from '@eloquentjs/core'\n\nexport default class ${name}Seeder extends Seeder {\n  async run() {\n    console.log('${name}Seeder done.')\n  }\n}\n`

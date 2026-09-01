@@ -35,10 +35,11 @@ function buildSchema(models, options = {}) {
     const typeDefsArr = [...preamble]
     const allQuery = [], allMutation = [], allSubscription = []
     const resolvers = { Query: {}, Mutation: {}, Subscription: {}, JSON: jsonScalar(), DateTime: dateTimeScalar() }
+    const knownTypes = new Set(models.map(m => m.name))
 
     for (const ModelClass of models) {
         const schema = introspect(ModelClass)
-        const sdl = generateGraphqlSDL(schema, { subscriptions })
+        const sdl = generateGraphqlSDL(schema, { subscriptions, knownTypes })
         typeDefsArr.push(sdl.typeDef, sdl.inputCreate, sdl.inputUpdate, sdl.inputWhere, sdl.paginated)
         allQuery.push(...sdl.queryLines)
         allMutation.push(...sdl.mutationLines)

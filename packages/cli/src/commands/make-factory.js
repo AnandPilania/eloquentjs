@@ -1,7 +1,7 @@
 import { resolve } from 'path'
 import {
   colors, success, error,
-  toPascalCase, resolveConfig, writeFile,
+  toPascalCase, resolveConfig, writeFile, relativeImportPath,
 } from '../utils.js'
 
 export async function cmdMakeFactory(ctx) {
@@ -20,15 +20,16 @@ export async function cmdMakeFactory(ctx) {
   const filename = `${name}.js`
   const factoryPath = resolve(cwd, cfg.paths.factories, filename)
 
-  const content = generateFactory(name, modelName)
+  const modelsPath = relativeImportPath(resolve(cwd, cfg.paths.factories), resolve(cwd, cfg.paths.models))
+  const content = generateFactory(name, modelName, modelsPath)
   const created = writeFile(factoryPath, content, { overwrite: flags.force || flags.f })
   if (created) success(`Factory created: ${cfg.paths.factories}/${filename}`)
 }
 
-function generateFactory(name, modelName) {
+function generateFactory(name, modelName, modelsPath) {
   return `import { Factory } from '@eloquentjs/core'
 import { faker } from '@faker-js/faker'
-import ${modelName} from '../models/${modelName}.js'
+import ${modelName} from '${modelsPath}/${modelName}.js'
 
 export default class ${name} extends Factory {
   model = ${modelName}

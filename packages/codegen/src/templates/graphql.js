@@ -12,13 +12,22 @@ import { toSnakePlural, toCamelCase } from '@eloquentjs/core'
 /**
  * Generate full GraphQL SDL for one model.
  * @param {import('../introspect.js').ModelSchema} schema
- * @param {{pagination?: 'offset'|'relay', subscriptions?: boolean}} opts
+ * @param {{pagination?: 'offset'|'relay', subscriptions?: boolean, knownTypes?: Set<string>}} opts
+ *   `knownTypes` — model names that will actually get a `type` in the final
+ *   document. When given, a relation whose related model isn't in it is
+ *   dropped instead of emitting a field that points at an undefined type —
+ *   generating SDL for a subset of an app's models (as the README's own
+ *   `buildSchema([User, Post, Comment])` example does) would otherwise
+ *   produce a schema `buildSchema()`/`makeExecutableSchema()` reject outright
+ *   the moment any one of those models has a relation to a model outside the
+ *   subset.
  * @returns {{ typeDef: string, inputCreate: string, inputUpdate: string, inputWhere: string, paginated: string, queryLines: string[], mutationLines: string[], subscriptionLines: string[] }}
  */
 export function generateGraphqlSDL(schema, opts = {}) {
   const {
     pagination    = 'offset',   // 'offset' | 'relay'
     subscriptions = true,
+    knownTypes    = null,
   } = opts
 
   const { name, fields, relations, softDeletes, graphql: gql } = schema
@@ -40,6 +49,7 @@ export function generateGraphqlSDL(schema, opts = {}) {
   // Add relation fields to the type
   for (const rel of relations) {
     if (rel.isPolymorphic) continue // polymorphic needs custom handling
+    if (knownTypes && !knownTypes.has(rel.related)) continue
     const gqlRelType = rel.isList ? `[${rel.related}!]` : rel.related
     typeFields.push(`  ${rel.name}: ${gqlRelType}`)
   }
@@ -173,9 +183,10 @@ export function generateGraphqlSchema(schemas, opts = {}) {
   const allQueryLines        = []
   const allMutationLines     = []
   const allSubscriptionLines = []
+  const knownTypes = new Set(schemas.map(s => s.name))
 
   for (const schema of schemas) {
-    const sdl = generateGraphqlSDL(schema, { pagination, subscriptions })
+    const sdl = generateGraphqlSDL(schema, { pagination, subscriptions, knownTypes })
     lines.push(sdl.typeDef, '')
     lines.push(sdl.inputCreate, '')
     lines.push(sdl.inputUpdate, '')

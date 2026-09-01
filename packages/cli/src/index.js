@@ -43,7 +43,7 @@ import { cmdDbSeed } from './commands/db-seed.js'
 import { cmdDbWipe } from './commands/db-wipe.js'
 import { cmdGenerate } from './commands/generate.js'
 import { cmdList } from './commands/list.js'
-import { colors, parseArgs } from './utils.js'
+import { colors, parseArgs, disconnectLoadedDriver } from './utils.js'
 
 /** command name -> handler. One place to add a command. */
 const COMMANDS = {
@@ -128,6 +128,8 @@ export async function run(args = process.argv.slice(2), { cwd = process.cwd(), s
 ${colors.red}✖ Error: ${err.message}${colors.reset}`)
         if (flags.verbose || flags.v) console.error(err.stack)
         return 1
+    } finally {
+        await disconnectLoadedDriver()
     }
 }
 

@@ -347,18 +347,18 @@ describe('GROUP BY / HAVING', () => {
 describe('Soft delete scopes', () => {
   test('query() auto-adds whereNull(deleted_at)', () => {
     const qb = Post.query()
-    expect(qb._wheres.some(w => w.type === 'null' && w.column === 'deleted_at')).toBe(true)
+    expect(qb._wheres.some(w => w.type === 'null' && w.column === 'posts.deleted_at')).toBe(true)
   })
 
   test('withTrashed() removes whereNull(deleted_at)', () => {
     const qb = Post.withTrashed()
-    expect(qb._wheres.some(w => w.type === 'null' && w.column === 'deleted_at')).toBe(false)
+    expect(qb._wheres.some(w => w.type === 'null' && w.column === 'posts.deleted_at')).toBe(false)
   })
 
   test('onlyTrashed() adds whereNotNull(deleted_at)', () => {
     const qb = Post.onlyTrashed()
-    expect(qb._wheres.some(w => w.type === 'null'    && w.column === 'deleted_at')).toBe(false)
-    expect(qb._wheres.some(w => w.type === 'notNull' && w.column === 'deleted_at')).toBe(true)
+    expect(qb._wheres.some(w => w.type === 'null'    && w.column === 'posts.deleted_at')).toBe(false)
+    expect(qb._wheres.some(w => w.type === 'notNull' && w.column === 'posts.deleted_at')).toBe(true)
   })
 
   test('withTrashed() + where() still includes that where', () => {
@@ -695,7 +695,7 @@ describe('Global scopes vs OR precedence', () => {
     // `(deleted_at IS NULL AND a=1) OR b=2` and leaks trashed rows.
     const ctx = Post.where('a', 1).orWhere('b', 2)._buildContext()
     expect(ctx.wheres).toHaveLength(2)
-    expect(ctx.wheres[0]).toMatchObject({ type: 'null', column: 'deleted_at', _scope: '_softDelete' })
+    expect(ctx.wheres[0]).toMatchObject({ type: 'null', column: 'posts.deleted_at', _scope: '_softDelete' })
     expect(ctx.wheres[1]).toMatchObject({ type: 'group', boolean: 'and' })
     expect(ctx.wheres[1].wheres.map(w => w.column)).toEqual(['a', 'b'])
   })
