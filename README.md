@@ -29,6 +29,7 @@ const users = await User
 | [`@eloquentjs/pgsql`](./packages/pgsql)         | ![npm](https://img.shields.io/npm/v/@eloquentjs/pgsql)     | PostgreSQL driver (multi-connection, transactions)                        |
 | [`@eloquentjs/sqlite`](./packages/sqlite)       | ![npm](https://img.shields.io/npm/v/@eloquentjs/sqlite)    | SQLite driver (better-sqlite3, file or in-memory)                         |
 | [`@eloquentjs/mongodb`](./packages/mongodb)     | ![npm](https://img.shields.io/npm/v/@eloquentjs/mongodb)   | MongoDB driver                                                            |
+| [`@eloquentjs/mysql`](./packages/mysql)         | ![npm](https://img.shields.io/npm/v/@eloquentjs/mysql)     | MySQL driver (mysql2, multi-connection, transactions)                     |
 | [`@eloquentjs/realtime`](./packages/realtime)   | ![npm](https://img.shields.io/npm/v/@eloquentjs/realtime)  | WebSocket pub/sub — Pusher-protocol, auto-broadcast                       |
 | [`@eloquentjs/graphql`](./packages/graphql)     | ![npm](https://img.shields.io/npm/v/@eloquentjs/graphql)   | Auto-generate GraphQL schema + resolvers                                  |
 | [`@eloquentjs/api`](./packages/api)             | ![npm](https://img.shields.io/npm/v/@eloquentjs/api)       | One-line REST CRUD routes (Express + Fastify)                             |
@@ -284,6 +285,7 @@ eloquentjs/
 │   ├── pgsql/         @eloquentjs/pgsql
 │   ├── sqlite/        @eloquentjs/sqlite
 │   ├── mongodb/       @eloquentjs/mongodb
+│   ├── mysql/         @eloquentjs/mysql
 │   ├── realtime/      @eloquentjs/realtime
 │   ├── graphql/       @eloquentjs/graphql
 │   ├── api/           @eloquentjs/api

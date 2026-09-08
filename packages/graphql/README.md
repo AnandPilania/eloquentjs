@@ -23,6 +23,12 @@ const { typeDefs, resolvers } = buildSchema([User, Post, Comment])
 const server = new ApolloServer({ typeDefs, resolvers })
 ```
 
+> **`knownTypes`:** only the models passed into the same `buildSchema()` (or
+> `buildSchemaFromDir()`) call are "known" for relation-type resolution. If a
+> model relates to another model that isn't included in that same call, the
+> relation field is dropped from the generated SDL instead of pointing at an
+> undefined GraphQL type — pass every related model together in one call.
+
 ### 2. From a models directory (auto-loads all model files)
 
 ```js
@@ -91,11 +97,32 @@ For models with `softDeletes = true`, also generates `restoreUser` and `forceDel
 
 ---
 
+## Relation Resolvers Are Batched (No N+1, No `dataloader`)
+
+Every declared relation (from `schema.relations`) gets an auto-generated field
+resolver, e.g. `Post.user` or `User.posts`. These resolvers automatically batch
+sibling parent loads that occur in the same event-loop tick into a single
+query per relation, the same idea as [DataLoader](https://github.com/graphql/dataloader)
+but with no extra dependency:
+
+```graphql
+query {
+  posts { title user { name } }   # N posts, each resolving `user`
+}
+```
+
+Without batching this would issue one query per post (`N+1`). Here, every
+`Post.user` resolver call in the same tick is collected and resolved with a
+single `_eagerLoad` query, then handed back to each waiting parent — so the
+query above costs one query for the posts and one query for all their users,
+regardless of how many posts there are.
+
+---
+
 ## Options
 
 ```js
 const { typeDefs, resolvers } = buildSchema([User, Post, Comment], {
-  pagination:    'offset',     // 'offset' (default) | 'relay'
   subscriptions: true,
   auth: async (ctx) => {
     const token = ctx.req.headers.authorization?.replace('Bearer ', '')
@@ -112,22 +139,10 @@ const { typeDefs, resolvers } = buildSchema([User, Post, Comment], {
 ```js
 class Post extends Model {
   static graphql = {
-    fields:       { secret_hash: false, internal_notes: false },  // hide fields
-    queries:      { deletePost: false, forceDeletePost: false },   // disable operations
     subscription: false,                                           // no subscriptions
     middleware:   [requireAuth, logQuery],                         // per-resolver middleware
   }
 }
-```
-
----
-
-## Relay Pagination
-
-```js
-const { typeDefs, resolvers } = buildSchema([User], { pagination: 'relay' })
-// type UserEdge { node: User!  cursor: String! }
-// type UserConnection { edges: [UserEdge!]!  pageInfo: PageInfo!  totalCount: Int! }
 ```
 
 ---

@@ -17,7 +17,7 @@
 
 import { Collection } from '../Collection.js'
 import { inferForeignKey, toSnakeCase } from '../utils.js'
-import { RelationNotFoundException } from '../errors.js'
+import { RelationNotFoundException, LazyLoadingViolationError } from '../errors.js'
 
 function getResolver(ModelClass) {
     // Import lazily to avoid circular dep at module load time
@@ -81,6 +81,11 @@ class Relation {
      * @returns {import('../QueryBuilder.js').QueryBuilder}
      */
     getQuery() {
+        // Set by the Model Proxy when Model.preventLazyLoading() is on and this
+        // relation wasn't eager-loaded — see modelProxyHandler.get() in Model.js.
+        if (this._lazyGuard && !this._lazyGuard.model.relationLoaded(this._lazyGuard.relation)) {
+            throw new LazyLoadingViolationError(this._lazyGuard.model.constructor.name, this._lazyGuard.relation)
+        }
         const qb = this._baseQuery()
         for (const fn of this._constraints) fn(qb)
         return qb

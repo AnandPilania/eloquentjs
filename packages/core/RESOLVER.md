@@ -59,6 +59,8 @@ Treat it as the complete description of a query:
   limit:     null | number,
   offset:    null | number,
   distinct:  false,
+  lock:      null | 'update' | 'shared',   // set by lockForUpdate() / sharedLock()
+  unions:    [{ table, ctx, all }],         // set by union() / unionAll(); ctx is a nested query context
 }
 ```
 
@@ -163,25 +165,30 @@ quoting helper — core does not pre-quote, and `column` can be `table.column`.
 
 ### Relations
 
-Both pivot methods take one options object:
+`belongsToMany` and `hasManyThrough` are **not** separate resolver methods —
+core has no `selectPivot`/`selectPivotMany`/`hasManyThrough`/
+`hasManyThroughMany` calls anywhere. Both relations are expressed as an
+ordinary `select()` with a `ctx.joins` entry, built via `Related.query()`
+the same way any other query is:
 
-```js
-selectPivot({ mainTable, pivotTable, mainKey, pivotForeignKey, pivotRelatedKey, foreignId,  pivotColumns })
-selectPivotMany({ ...same..., foreignIds })   // batched, for eager loading
-```
+- `belongsToMany` joins the pivot table onto the related table
+  (`pivot.related_key = related.id`), filters on
+  `pivot.foreign_key = parentId`, and — when `withPivot(...)` columns were
+  requested — adds them to `ctx.selects` as
+  `{ raw: '"pivot"."col" AS "_pivot_col"' }`. Eager loading additionally
+  selects `"pivot"."foreign_key" AS "_pivot_foreign_id"` so core can group
+  rows back onto their parents; a single `select()` covers a whole batch of
+  parents via `whereIn`.
+- `hasManyThrough` joins the through table onto the related table
+  (`through.through_key = related.second_key`) and filters on
+  `through.first_key = parentId` (or `whereIn` for eager loading).
 
-Return related rows. Pivot columns listed in `pivotColumns` come back on each
-row prefixed `_pivot_<column>`; the batched form additionally needs
-`_pivot_foreign_id` so core can group rows back onto their parents.
-
-```js
-hasManyThrough({ relatedTable, throughTable, firstKey, secondKey, throughKey, parentId })
-hasManyThroughMany({ ...same..., parentIds })
-```
-
-A store that cannot express these should **throw a clear error** rather than
-return wrong data — see `@eloquentjs/mongodb`, which throws for pivots and is
-honest about it.
+Because both go through `ctx.joins`, a resolver that implements ordinary
+`select()` with join support gets pivot and through relations for free — there
+is nothing extra to implement. A store that cannot join at all should set
+`supportsJoins = false` (see below) so these relations **throw a clear error**
+rather than return wrong data, instead of trying to honor `selectPivot`-style
+methods that core never calls.
 
 ### Schema
 

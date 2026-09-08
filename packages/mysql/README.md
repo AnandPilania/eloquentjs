@@ -68,12 +68,100 @@ Nested calls become SAVEPOINTs, same as `@eloquentjs/pgsql`.
 
 ---
 
+## Raw Queries
+
+```js
+import { raw } from '@eloquentjs/mysql'
+
+// Raw query with parameterized values (uses default connection)
+const rows = await raw(
+  'SELECT * FROM users WHERE age > ? AND country = ?',
+  [18, 'US']
+)
+
+// Named connection
+const rows = await raw('SELECT * FROM archive_events', [], 'archive')
+
+// Inside a model query
+await User.whereRaw('LOWER(email) = ?', ['alice@example.com']).first()
+await User.selectRaw('count(*) as total, country').groupBy('country').get()
+```
+
+---
+
+## Schema Builder
+
+```js
+import { Schema } from '@eloquentjs/core'
+
+// CREATE TABLE
+await Schema.create('users', t => {
+  t.id()                                         // INT UNSIGNED AUTO_INCREMENT PRIMARY KEY
+  t.uuid('uuid').unique()                        // CHAR(36)
+  t.string('name')                               // VARCHAR(255)
+  t.string('email', 191).unique()                // VARCHAR(191) UNIQUE
+  t.text('bio').nullable()
+  t.integer('age').nullable()
+  t.bigInteger('score').default(0)
+  t.decimal('price', 8, 2).default(0)
+  t.boolean('is_active').default(true)           // TINYINT(1)
+  t.json('settings').nullable()
+  t.date('born_at').nullable()
+  t.timestamp('email_verified_at').nullable()
+  t.timestamps()                                 // created_at + updated_at
+  t.softDeletes()                                // deleted_at
+  t.foreignId('user_id').constrained('users').cascadeOnDelete()
+  t.index(['name', 'email'])
+  t.unique(['email', 'tenant_id'])
+})
+
+// ALTER TABLE
+await Schema.table('users', t => {
+  t.string('avatar_url').nullable()
+  t.dropColumn('old_field')
+  t.index('email')
+})
+
+// Other operations
+await Schema.dropIfExists('old_table')
+await Schema.rename('old_name', 'new_name')
+await Schema.hasTable('users')                   // → true/false
+await Schema.hasColumn('users', 'email')         // → true/false
+await Schema.getColumnListing('users')           // → ['id', 'name', ...]
+```
+
+`t.increments()`/`t.bigIncrements()` render as `INT UNSIGNED AUTO_INCREMENT`/
+`BIGINT UNSIGNED AUTO_INCREMENT` — MySQL's equivalent of Postgres's
+`SERIAL`/`BIGSERIAL`. Identifiers are quoted with backticks (`` `table` ``),
+not double quotes.
+
+---
+
 ## Notes vs. Postgres/SQLite
 
 - MySQL has no `RETURNING` clause. `insert()`/`insertMany()` re-select the inserted row(s) by `insertId`, assuming the table's primary key column is named `id` (the same convention `Blueprint`'s `t.id()`/`t.bigIncrements()` use elsewhere in this project).
 - `upsert()` uses `INSERT ... ON DUPLICATE KEY UPDATE`, so `uniqueBy` must name a column covered by a `UNIQUE`/`PRIMARY` index.
 - No native `JSONB` — `jsonb()` columns map to `JSON`.
 - `TRUNCATE` always resets `AUTO_INCREMENT`; `restartIdentity` is a no-op.
+- `truncate(table, { cascade: true })` toggles `FOREIGN_KEY_CHECKS` off for the
+  duration of the `TRUNCATE` (then back on), since MySQL's `TRUNCATE` has no
+  `CASCADE` keyword — this is the MySQL equivalent of Postgres's
+  `TRUNCATE ... CASCADE`.
+
+---
+
+## Configuration Reference
+
+| Option | Default | Description |
+|---|---|---|
+| `host` | `localhost` | MySQL server host |
+| `port` | `3306` | MySQL port |
+| `database` | — | Database name (required). Alias: `db` |
+| `user` | — | Username (required). Alias: `username` |
+| `password` | — | Password. Alias: `pass` |
+| `ssl` | — | Enable TLS/SSL |
+| `poolSize` | `10` | Max pool connections (`connectionLimit`) |
+| `url` | — | Full connection URL (overrides above) |
 
 ---
 

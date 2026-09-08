@@ -11,8 +11,9 @@ export class ModelNotFoundException extends Error {
 }
 
 export class MassAssignmentException extends Error {
-  constructor(field) {
-    super(`Field "${field}" is not fillable`)
+  /** Callers pass one fully-formatted message describing the problem. */
+  constructor(message) {
+    super(message)
     this.name = 'MassAssignmentException'
   }
 }
@@ -34,8 +35,20 @@ export class PolicyException extends Error {
 }
 
 export class RelationNotFoundException extends Error {
-  constructor(model, relation) {
-    super(`Relation "${relation}" not found on model "${model}"`)
+  /** Callers pass one fully-formatted message describing the problem. */
+  constructor(message) {
+    super(message)
     this.name = 'RelationNotFoundException'
+  }
+}
+
+/**
+ * Thrown when `Model.preventLazyLoading()` is on and code reads a relation
+ * that was not eager-loaded — Laravel Eloquent 9's equivalent guard.
+ */
+export class LazyLoadingViolationError extends Error {
+  constructor(model, relation) {
+    super(`Attempted to lazy load [${relation}] relation on model [${model}] but lazy loading is disabled.`)
+    this.name = 'LazyLoadingViolationError'
   }
 }

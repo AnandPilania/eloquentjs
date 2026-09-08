@@ -114,8 +114,12 @@ export class MongoResolver {
      * @param {string} connectionName
      */
     /**
-     * Relations that need a JOIN (belongsToMany, hasManyThrough) check this and
-     * throw a clear error rather than silently ignoring the join clause.
+     * `belongsToMany()` needs a pivot-table JOIN, which MongoDB has no
+     * equivalent for — `selectPivot`/`selectPivotMany` below throw a clear
+     * error rather than silently ignoring the join clause. `hasManyThrough()`
+     * / `hasOneThrough()` are NOT affected: they're implemented below via two
+     * sequential `find()`s (no join required), so `supportsJoins` does not
+     * gate them.
      */
     supportsJoins = false
 

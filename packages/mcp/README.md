@@ -88,7 +88,7 @@ eloquent-mcp --cwd /path/to/project
 | `list_models` | All models: fields with types, relations, casts, scopes, graphql config |
 | `describe_model` | Full introspection of one model — every field, relation, scope, hook |
 | `list_migrations` | Status of all migrations (ran/pending/batch number/timestamp) |
-| `describe_database_schema` | Live table/column/index/FK info from the database |
+| `describe_database_schema` | Live table/column/index/FK info from the database (pgsql only — see note below) |
 | `get_project_structure` | Config file, paths, installed packages, model/migration counts |
 
 ### Code Generation (5 tools)
@@ -102,6 +102,8 @@ eloquent-mcp --cwd /path/to/project
 | `generate_openapi_spec` | `models[]?`, `format?`, `write?` | OpenAPI 3.0 spec (JSON or YAML) |
 
 > All generation tools return code as a string by default. Pass `write: true` to save files to disk.
+
+> **Driver note:** `describe_database_schema` currently only supports the `pgsql` driver — it queries `information_schema` and `pg_indexes`/`pg_tables` directly. Calling it against a `sqlite`, `mysql`, or `mongodb` connection will fail or return incorrect results.
 
 ### Query & Execution (6 tools)
 
@@ -122,7 +124,7 @@ eloquent-mcp --cwd /path/to/project
 | `get_method_signature` | `method` | Exact signature, return type, description |
 | `get_examples` | `topic` | Copy-paste code for common patterns |
 | `nlp_query` | `query`, `execute?` | Natural language → QueryBuilder chain |
-| `nlp_crud` | `instruction`, `execute?` | Natural language → CRUD operation code |
+| `nlp_crud` | `instruction`, `execute?` | Natural language → CRUD operation code (never executes — `execute` only annotates the result with a warning; see note below) |
 
 #### `get_help` topics
 `model` · `query-builder` · `relations` · `casts` · `scopes` · `hooks` · `events` · `soft-deletes` · `validation` · `migrations` · `graphql` · `api` · `realtime` · `mcp`
@@ -145,6 +147,8 @@ eloquent-mcp --cwd /path/to/project
 "delete Post 7"
 "find User with id 5"
 ```
+
+> **`execute` note:** unlike `nlp_query`, `nlp_crud` never actually runs the operation it generates, even when `execute: true` is passed — it only generates code for you to review and run yourself. Passing `execute: true` just adds a `warning` field to the result restating this.
 
 ---
 

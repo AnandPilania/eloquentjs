@@ -18,6 +18,21 @@ const mockFs = {
 }
 jest.unstable_mockModule('fs', () => mockFs)
 
+// ─── Mock mysql2/promise so loadConnection('mysql') needs no real MySQL server ──
+class FakeMysqlConnection {
+  release() {}
+  async query() { return [[{ '1': 1 }]] }
+}
+class FakeMysqlPool {
+  constructor(config) { this.config = config }
+  async getConnection() { return new FakeMysqlConnection() }
+  async query() { return [[], []] }
+  async end() {}
+}
+jest.unstable_mockModule('mysql2/promise', () => ({
+  default: { createPool: (config) => new FakeMysqlPool(config) },
+}))
+
 // ─── Mock process.exit so tests don't actually exit ──────────────────────────
 const mockExit = jest.spyOn(process, 'exit').mockImplementation((code) => {
   throw new Error(`process.exit(${code})`)
@@ -637,6 +652,17 @@ describe('init command', () => {
     expect(configWrite.content).toContain('SQLITE_DATABASE')
   })
 
+  test('--driver=mysql uses mysql config', async () => {
+    const { cmdInit } = await import('../../packages/cli/src/commands/init.js')
+    await cmdInit({ cwd: '/project', config: null, flags: { driver: 'mysql' }, positional: [] })
+    const configWrite = capturedWrites.find(w => w.path.endsWith('eloquent.config.js'))
+    expect(configWrite.content).toContain("driver:   'mysql'")
+    expect(configWrite.content).toContain('DB_HOST')
+    expect(configWrite.content).toContain('poolSize')
+    const envWrite = capturedWrites.find(w => w.path.endsWith('.env.example'))
+    expect(envWrite.content).toContain('DB_HOST')
+  })
+
   test('creates DatabaseSeeder', async () => {
     const { cmdInit } = await import('../../packages/cli/src/commands/init.js')
     await cmdInit({ cwd: '/project', config: null, flags: {}, positional: [] })
@@ -656,8 +682,40 @@ describe('init command', () => {
   test('throws for invalid driver', async () => {
     const { cmdInit } = await import('../../packages/cli/src/commands/init.js')
     await expect(
-      cmdInit({ cwd: '/project', config: null, flags: { driver: 'mysql' }, positional: [] })
+      cmdInit({ cwd: '/project', config: null, flags: { driver: 'oracle' }, positional: [] })
     ).rejects.toThrow('Unknown driver')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// loadConnection — driver package resolution
+// ─────────────────────────────────────────────────────────────────────────────
+describe('loadConnection', () => {
+  test('resolves @eloquentjs/mysql for driver: mysql (no real MySQL server needed)', async () => {
+    const { loadConnection, disconnectLoadedDriver } = await import('../../packages/cli/src/utils.js')
+    const ctx = {
+      cwd: process.cwd(),
+      config: {
+        connection: { driver: 'mysql', host: 'localhost', database: 'test', user: 'root', password: '' },
+      },
+      flags: {},
+      positional: [],
+    }
+    const resolver = await loadConnection(ctx)
+    expect(resolver).toBeDefined()
+    expect(resolver.constructor.name).toBe('MySqlResolver')
+    await disconnectLoadedDriver()
+  })
+
+  test('throws Unsupported driver for an unknown driver', async () => {
+    const { loadConnection } = await import('../../packages/cli/src/utils.js')
+    const ctx = {
+      cwd: process.cwd(),
+      config: { connection: { driver: 'oracle' } },
+      flags: {},
+      positional: [],
+    }
+    await expect(loadConnection(ctx)).rejects.toThrow(/Unsupported driver: oracle/)
   })
 })
 

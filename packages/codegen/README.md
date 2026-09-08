@@ -299,8 +299,8 @@ See the [@eloquentjs/cli README](../cli/README.md) for full details.
 
 | Import path                      | Exports                                                                                                      |
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `@eloquentjs/codegen`            | `introspect`, `introspectAll`, `resolveCastType`, `CAST_TYPE_MAP`, all templates, all render functions       |
-| `@eloquentjs/codegen/introspect` | `introspect`, `introspectAll`, `resolveCastType`, `CAST_TYPE_MAP`                                            |
+| `@eloquentjs/codegen`            | `introspect`, `introspectAll`, `resolveCastType`, `CAST_TYPE_MAP`, `DEFAULT_TYPE`, `ID_TYPE`, all templates, all render functions       |
+| `@eloquentjs/codegen/introspect` | `introspect`, `introspectAll`, `resolveCastType`, `CAST_TYPE_MAP`, `DEFAULT_TYPE` (fallback type mapping for unrecognized casts), `ID_TYPE` (type mapping used for primary-key fields) |
 | `@eloquentjs/codegen/templates`  | All template generators                                                                                      |
 | `@eloquentjs/codegen/render`     | `loadModelsFromDir`, `loadModelsByName`, `renderGraphql`, `renderTypeScript`, `renderOpenApi`, `renderStubs` |
 

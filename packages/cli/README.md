@@ -30,6 +30,7 @@ eloquent init
 # Initialize with a different driver (pgsql is the default)
 eloquent init --driver=mongodb
 eloquent init --driver=sqlite
+eloquent init --driver=mysql
 
 # Create a model
 eloquent make:model User
@@ -55,6 +56,7 @@ eloquent db:seed
 | `eloquent init` | Scaffold `eloquent.config.js`, directory structure, and `.env.example` |
 | `eloquent init --driver=mongodb` | Initialize with MongoDB driver |
 | `eloquent init --driver=sqlite` | Initialize with SQLite driver |
+| `eloquent init --driver=mysql` | Initialize with MySQL driver |
 | `eloquent list` | List all available commands |
 
 ### Generators (`make:*`)
@@ -66,7 +68,7 @@ eloquent db:seed
 | `eloquent make:model <Name> --factory` | Model + factory |
 | `eloquent make:model <Name> --seed` | Model + seeder |
 | `eloquent make:model <Name> --all` | Model + migration + factory + seeder |
-| `eloquent make:model <Name> --soft-deletes` | Add `softDeletes = true` |
+| `eloquent make:model <Name> --soft-deletes` (alias `-s`) | Add `softDeletes = true` |
 | `eloquent make:migration <name>` | Generate a migration file |
 | `eloquent make:seeder <Name>` | Generate a seeder class |
 | `eloquent make:factory <Name>` | Generate a factory class |
@@ -87,7 +89,7 @@ eloquent make:migration drop_old_logs_table      # → DROP TABLE template
 |---|---|
 | `eloquent migrate` | Run all pending migrations |
 | `eloquent migrate:rollback` | Rollback the last batch |
-| `eloquent migrate:rollback --step=3` | Rollback the last 3 batches |
+| `eloquent migrate:rollback --step=3` (alias `-s=3`) | Rollback the last 3 batches |
 | `eloquent migrate:reset` | Rollback ALL migrations |
 | `eloquent migrate:refresh` | Reset + re-run all migrations |
 | `eloquent migrate:refresh --seed` | Refresh then seed |
@@ -123,7 +125,7 @@ npm install @eloquentjs/codegen
 |---|---|
 | `--models=User,Post` | Generate for specific models only |
 | `--models-dir=<path>` | Override the models directory (default: from `eloquent.config.js`) |
-| `--out=<file>` | Custom output file path |
+| `--out=<file>` (alias `-o=<file>`) | Custom output file path |
 
 **`generate:graphql` options:**
 
@@ -265,7 +267,7 @@ import { faker } from '@faker-js/faker'
 import Post from '../../app/models/Post.js'
 
 export default class PostFactory extends Factory {
-  model = Post
+  static model = Post
 
   definition() {
     return {
@@ -277,6 +279,8 @@ export default class PostFactory extends Factory {
   // published() { return this.state({ status: 'published' }) }
 }
 ```
+
+> Shown above is the `@eloquentjs/codegen`-backed output (the common/recommended path — `static model = Post`). If `@eloquentjs/codegen` isn't installed, the CLI falls back to a simpler inline template that instead sets `model = Post` as an instance property.
 
 ---
 
@@ -292,7 +296,9 @@ _migrations
   ran_at      TIMESTAMPTZ
 ```
 
-Rollbacks undo the last batch by default. Use `--step=N` to roll back multiple batches.
+Rollbacks undo the last batch by default. Use `--step=N` (alias `-s=N`) to roll back multiple batches.
+
+On pgsql and sqlite, each migration's `up()`/`down()` plus its `_migrations` record run inside one transaction, so a migration that fails partway through leaves no trace. On MySQL, DDL statements (`CREATE TABLE`, `ALTER TABLE`, ...) implicitly commit, so this guarantee doesn't hold — a failed MySQL migration can leave a partially-applied schema change. Concurrent `migrate`/`migrate:rollback`/`migrate:reset` runs are still serialized on every driver (pg advisory locks on pgsql, `GET_LOCK`/`RELEASE_LOCK` on MySQL; sqlite is single-writer already).
 
 ---
 

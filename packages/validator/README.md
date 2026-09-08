@@ -27,6 +27,8 @@ const schema = v.schema({
   }),
   tags: v.array().min(1).max(10),
 })
+// NumberSchema also has .oneOf(), .positive(), .between(lo, hi), .digits(n),
+// and .gt()/.gte()/.lt()/.lte() (compare against another field)
 
 // parse() — throws ValidationException on failure
 const data = schema.parse(req.body)
@@ -88,6 +90,7 @@ const data = await Validator.make(req.body, rules).validatedAsync()
 | `sometimes` | Only validate when field is present in input |
 | `prohibited` | Field must not be present |
 | `required_if:field,value` | Required when another field equals a value |
+| `required_unless:field,value` | Required unless another field equals a value |
 | `required_with:a,b` | Required when any of the listed fields are present |
 | `required_with_all:a,b` | Required when all listed fields are present |
 | `required_without:a,b` | Required when any of the listed fields are absent |
@@ -249,6 +252,12 @@ const schema = v.schema({
     zip:     v.string().digits(5),
     country: v.string().length(2),
   }),
+})
+
+// v.array(itemSchema) validates each element against the item schema
+// (errors are reported per index, e.g. 'tags.0', 'tags.1')
+const schema2 = v.schema({
+  tags: v.array(v.string().min(3)),
 })
 ```
 

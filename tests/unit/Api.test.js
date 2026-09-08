@@ -281,6 +281,20 @@ describe('policies cover every action', () => {
   })
 })
 
+describe('PUT vs PATCH policy action', () => {
+  test('PATCH passes "patch" and PUT passes "update" to the policy', async () => {
+    resolver.select = async () => [{ id: 1, name: 'Alice', email: 'a@x.com' }]
+    const seen = []
+    const policy = async (req, model, action) => { seen.push(action); return true }
+    const router = apiRouter([resource(User, { policy })])
+
+    await call(router, { path: '/users/1', method: 'PUT', body: { name: 'Bob' } })
+    await call(router, { path: '/users/1', method: 'PATCH', body: { name: 'Bob' } })
+
+    expect(seen).toEqual(['update', 'patch'])
+  })
+})
+
 describe('?with= is opt-in', () => {
   test('a relation not listed in `with` is ignored', async () => {
     await call(apiRouter([resource(User)]), { path: '/users', query: { with: 'secretRelation' } })

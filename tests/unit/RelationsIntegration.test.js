@@ -10,7 +10,7 @@
 
 import { SQLiteResolver } from '../../packages/sqlite/src/index.js'
 import {
-  Model, DB, setResolver, clearResolvers, ModelRegistry,
+  Model, DB, setResolver, clearResolvers, ModelRegistry, LazyLoadingViolationError,
 } from '../../packages/core/src/index.js'
 
 let DatabaseSync
@@ -300,6 +300,52 @@ describeIf('Relations (real SQL)', () => {
     await User.create({ name: 'Alice' })
     const users = await User.withCount('posts').get()
     expect(users[0].posts_count).toBe(0)
+  })
+
+  // ── Model.preventLazyLoading() ─────────────────────────────────────────────
+  test('preventLazyLoading() throws on an unloaded relation but never on an eager-loaded one', async () => {
+    const alice = await User.create({ name: 'Alice' })
+    await alice.posts().create({ title: 'First' })
+
+    Model.preventLazyLoading(true)
+    try {
+      const fresh = await User.find(alice.id)                 // 'posts' not eager-loaded
+      // getQuery() throws synchronously (get() has no chance to return a
+      // rejected promise first), so assert on the call itself, not on .rejects.
+      expect(() => fresh.posts().get()).toThrow(LazyLoadingViolationError)
+
+      const eager = await User.with('posts').find(alice.id)   // eager-loaded
+      // A loaded relation resolves straight from the Proxy (relationLoaded()
+      // short-circuits before the guarded function-wrapping branch), so
+      // reading it never reaches getQuery()/the guard at all.
+      expect(eager.posts).toHaveLength(1)
+    } finally {
+      Model.preventLazyLoading(false)   // restore the default for every other test
+    }
+  })
+
+  test('preventLazyLoading() is off by default and non-invasive', async () => {
+    const alice = await User.create({ name: 'Alice' })
+    await alice.posts().create({ title: 'First' })
+    const fresh = await User.find(alice.id)
+    await expect(fresh.posts().get()).resolves.toHaveLength(1)   // no guard installed, no throw
+  })
+
+  // ── DB.listen() ─────────────────────────────────────────────────────────────
+  test('DB.listen() reports sql/ms for a simple query', async () => {
+    const events = []
+    const off = DB.listen(e => events.push(e))
+    try {
+      await User.create({ name: 'Alice' })
+      await User.all()
+    } finally {
+      off()
+      DB.forgetListeners()
+    }
+    const selectEvent = events.find(e => typeof e.sql === 'string')
+    expect(selectEvent).toBeDefined()
+    expect(selectEvent.sql).toEqual(expect.any(String))
+    expect(selectEvent.ms).toEqual(expect.any(Number))
   })
 })
 

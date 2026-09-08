@@ -90,6 +90,9 @@ client.subscribe('users.42')
 const authed = new RealtimeClient('ws://localhost:6001', {
   authEndpoint: '/broadcasting/auth',
   authHeaders: { Authorization: `Bearer ${token}` },
+  // Optional: override the fetch implementation used for the auth request
+  // (e.g. a polyfill in non-browser environments, or a fetch mock in tests).
+  fetch: myFetchImpl,
 })
 authed.private('orders.123')
   .on('updated', order => updateOrderUI(order))
@@ -197,6 +200,7 @@ echo.channel('users')
 | `events` | `['created','updated','deleted']` | Which events to broadcast |
 | `channel` | model name pluralized | Channel name |
 | `transform` | `null` | Transform payload before sending |
+| `private` | `false` | Prefix the channel with `private-`, requiring a valid auth signature to subscribe |
 
 ---
 

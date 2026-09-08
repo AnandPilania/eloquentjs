@@ -56,10 +56,18 @@ rejected.
 
 ### Not supported
 
-`belongsToMany()` and `hasManyThrough()` need a JOIN. The resolver declares
-`supportsJoins = false`, so those relations throw a clear error instead of
-silently ignoring the join and returning wrong rows. Use embedded arrays or an
-aggregation pipeline via `DB.raw()`.
+`belongsToMany()` needs a pivot-table JOIN, which MongoDB has no equivalent
+for. The resolver declares `supportsJoins = false`, and `selectPivot`/
+`selectPivotMany` throw a clear error instead of silently ignoring the join
+and returning wrong rows. Use embedded arrays or an aggregation pipeline via
+`DB.raw()`.
+
+`hasManyThrough()` / `hasOneThrough()` **are** supported — no join is needed,
+just two sequential queries (through-table first, then the related
+collection filtered by the ids found).
+
+`union()` is also not supported — SQL `UNION` has no equivalent `find()`
+semantics in MongoDB, so a query using it throws.
 
 ```js
 
@@ -124,9 +132,49 @@ await Schema.create('users', col => {
   col.index(['tenant_id', 'created_at'])      // compound index
 })
 
+await Schema.rename('old_collection', 'new_collection')
 await Schema.dropIfExists('old_collection')
 await Schema.hasTable('users')
 ```
+
+---
+
+## Transactions
+
+Prefer the driver-agnostic facade — it works identically on every driver:
+
+```js
+import { DB } from '@eloquentjs/core'
+
+await DB.transaction(async () => {
+  const user = await User.create({ name: 'Alice' })
+  await user.profile().create({ bio: 'Hello' })
+  // Any thrown error aborts the transaction, and none of the above is durable
+})
+
+await DB.transaction(callback, 'analytics')   // a named connection
+```
+
+The driver export is equivalent and delegates to the same implementation:
+
+```js
+import { transaction } from '@eloquentjs/mongodb'
+
+await transaction(async (tx) => {
+  await User.create({ name: 'Alice' })   // runs inside the session's transaction
+})
+```
+
+MongoDB has no savepoints, so a nested `transaction()` call just joins the
+outer one rather than creating a new checkpoint.
+
+> **Requires a replica set or sharded cluster.** MongoDB transactions are
+> **not supported against a standalone `mongod`** — the exact setup shown in
+> this README's own Setup section (`mongodb://localhost:27017` with no
+> replica set) will throw when `transaction()`/`DB.transaction()` is called.
+> For local development, run MongoDB as a single-node replica set (e.g.
+> `mongod --replSet rs0` + `rs.initiate()`), or use Atlas/a real replica set
+> in any environment that needs transactions.
 
 ---
 
@@ -141,7 +189,7 @@ await Schema.hasTable('users')
 | `authSource` | `admin` | Auth database |
 | `tls` | `false` | Enable TLS |
 | `replicaSet` | — | Replica set name |
-| `maxPoolSize` | `10` | Max connection pool size |
+| `maxPoolSize` | driver default (100) | Max connection pool size — passed straight through to the `mongodb` driver; this package does not set its own default |
 
 ---
 

@@ -34,9 +34,9 @@ export async function cmdInit(ctx) {
 
     // ── 2. Detect driver preference ─────────────────────────────────────────
     const driver = flags.driver ?? flags.db ?? 'pgsql'
-    const validDrivers = ['pgsql', 'postgres', 'postgresql', 'mongodb', 'mongo', 'sqlite', 'sqlite3']
+    const validDrivers = ['pgsql', 'postgres', 'postgresql', 'mongodb', 'mongo', 'sqlite', 'sqlite3', 'mysql']
     if (!validDrivers.includes(driver)) {
-        throw new Error(`Unknown driver: ${driver}. Choose from: pgsql, mongodb, sqlite`)
+        throw new Error(`Unknown driver: ${driver}. Choose from: pgsql, mongodb, sqlite, mysql`)
     }
     const normalizedDriver = normalizeDriver(driver)
 
@@ -133,6 +133,15 @@ function generateConfig(driver) {
     driver:   'sqlite',
     database: process.env.SQLITE_DATABASE ?? './database.sqlite',
   }`,
+        mysql: `{
+    driver:   'mysql',
+    host:     process.env.DB_HOST     ?? 'localhost',
+    port:     Number(process.env.DB_PORT ?? 3306),
+    database: process.env.DB_DATABASE ?? 'myapp',
+    user:     process.env.DB_USERNAME ?? 'root',
+    password: process.env.DB_PASSWORD ?? '',
+    poolSize: Number(process.env.DB_POOL_SIZE ?? 10),
+  }`,
     }
     const envVars = connections[driver] ?? connections.pgsql
 
@@ -185,6 +194,16 @@ DB_DATABASE=myapp
 DB_USERNAME=postgres
 DB_PASSWORD=
 DB_SSL=false
+`
+    }
+    if (driver === 'mysql') {
+        return `# MySQL connection
+DB_HOST=localhost
+DB_PORT=3306
+DB_DATABASE=myapp
+DB_USERNAME=root
+DB_PASSWORD=
+DB_POOL_SIZE=10
 `
     }
     return `# MongoDB connection

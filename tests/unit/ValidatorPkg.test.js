@@ -522,6 +522,16 @@ describe('Schema API — boolean / date / array', () => {
     expect(schema.safeParse({ tags: [] }).success).toBe(false)
     expect(schema.safeParse({ tags: ['a'] }).success).toBe(true)
   })
+
+  test('v.array(itemSchema) validates each item against the item schema', () => {
+    const schema = v.schema({ tags: v.array(v.string().min(3)) })
+    const bad = schema.safeParse({ tags: ['ok', 'good'] })
+    expect(bad.success).toBe(false)
+    expect(bad.errors['tags.0']).toBeDefined()
+    expect(bad.errors['tags.1']).toBeUndefined()
+
+    expect(schema.safeParse({ tags: ['good', 'nice'] }).success).toBe(true)
+  })
 })
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -15,7 +15,7 @@
  * ConnectionRegistry — nothing needs to be threaded through call sites.
  */
 
-import { getResolver, inTransaction } from './ConnectionRegistry.js'
+import { getResolver, inTransaction, listen, forgetListeners } from './ConnectionRegistry.js'
 import { Model } from './Model.js'
 
 /** Anonymous Model subclasses for DB.table(), one per table+connection. */
@@ -87,5 +87,21 @@ export const DB = {
   /** The resolver backing the named connection (transaction-aware). */
   connection(name = 'default') {
     return getResolver(name)
+  },
+
+  /**
+   * Fires `callback({ sql, params, ms, connection })` after every resolver-level
+   * query on every connection. `sql`/`params` are best-effort (only `select`
+   * renders them, via the resolver's own toSQL()); `ms` and `connection` are
+   * always present. Returns an unsubscribe function.
+   * @param {(event: {sql: any, params: any, ms: number, connection: string}) => void} callback
+   */
+  listen(callback) {
+    return listen(callback)
+  },
+
+  /** Remove every registered DB.listen() callback. */
+  forgetListeners() {
+    forgetListeners()
   },
 }

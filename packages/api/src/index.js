@@ -143,8 +143,8 @@ function buildRoutes(ModelClass, options = {}) {
     routes.push(route('restore', 'post', [':id', 'restore'], (req, p) => handleRestore(ModelClass, p.id, req, ctx)))
   }
   if (allowed.has('show')) routes.push(route('show', 'get', [':id'], (req, p) => handleShow(ModelClass, p.id, req, ctx)))
-  if (allowed.has('update')) routes.push(route('update', 'put', [':id'], (req, p) => handleUpdate(ModelClass, p.id, req, ctx)))
-  if (allowed.has('patch')) routes.push(route('patch', 'patch', [':id'], (req, p) => handleUpdate(ModelClass, p.id, req, ctx)))
+  if (allowed.has('update')) routes.push(route('update', 'put', [':id'], (req, p) => handleUpdate(ModelClass, p.id, req, ctx, 'update')))
+  if (allowed.has('patch')) routes.push(route('patch', 'patch', [':id'], (req, p) => handleUpdate(ModelClass, p.id, req, ctx, 'patch')))
   if (allowed.has('destroy')) routes.push(route('destroy', 'delete', [':id'], (req, p) => handleDestroy(ModelClass, p.id, req, ctx)))
 
   return routes
@@ -322,11 +322,11 @@ async function handleShow(ModelClass, id, req, { withs, policy }) {
   return model
 }
 
-async function handleUpdate(ModelClass, id, req, { policy }) {
+async function handleUpdate(ModelClass, id, req, { policy }, action = 'update') {
   const model = await ModelClass.findOrFail(id)
 
   if (policy) {
-    const allowed = await policy(req, model, 'update')
+    const allowed = await policy(req, model, action)
     if (!allowed) throw new PolicyException('Forbidden')
   }
 

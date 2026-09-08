@@ -141,6 +141,7 @@ The router maps known error types to HTTP status codes automatically:
 | `ModelNotFoundException` | `404 Not Found` |
 | `ValidationException` | `422 Unprocessable Entity` |
 | `PolicyException` | `403 Forbidden` |
+| `MassAssignmentException` | `422 Unprocessable Entity` |
 | Any other error | passed to `next(err)` |
 
 ---

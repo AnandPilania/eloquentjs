@@ -139,10 +139,11 @@ export async function loadConnection(ctx) {
         mongo: '@eloquentjs/mongodb',
         sqlite: '@eloquentjs/sqlite',
         sqlite3: '@eloquentjs/sqlite',
+        mysql: '@eloquentjs/mysql',
     }
     const pkg = driverPackages[driver]
     if (!pkg) {
-        throw new Error(`Unsupported driver: ${driver}. Supported: pgsql, mongodb, sqlite`)
+        throw new Error(`Unsupported driver: ${driver}. Supported: pgsql, mongodb, sqlite, mysql`)
     }
 
     // Resolve the driver from the user's PROJECT directory, not from wherever the

@@ -108,7 +108,7 @@ export async function handleQueryModel(args, ctx) {
   }
 
   if (args.orderBy) qb = qb.orderBy(args.orderBy, args.order ?? 'asc')
-  if (args.limit)   qb = qb.limit(Math.min(args.limit, 100))  // cap at 100 for safety
+  qb = qb.limit(Math.min(args.limit ?? 100, 100))  // always cap at 100 for safety, even when omitted
   if (args.offset)  qb = qb.offset(args.offset)
   if (args.with?.length) qb = qb.with(...args.with)
 

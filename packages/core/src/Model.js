@@ -50,6 +50,11 @@ const _trashed = new WeakMap()
 const _changes = new WeakMap()   // what the last save() actually wrote — wasChanged()
 const SELF = Symbol('self')  // proxy[SELF] → raw instance
 
+// Global N+1 guard — off by default. Model.preventLazyLoading(true) flips it;
+// checked from the Proxy get-trap below and enforced in Relation.getQuery().
+let LAZY_LOADING_PREVENTED = false
+export function isLazyLoadingPrevented() { return LAZY_LOADING_PREVENTED }
+
 // Classes with mass assignment disabled. Per-class, inherited down the chain:
 // Model.unguard() unguards everything, User.unguard() only User.
 const _unguardedClasses = new WeakSet()
@@ -311,6 +316,13 @@ export class Model {
      * @param {...any} args
      * @returns {QueryBuilder}
      */
+    /**
+     * Throw LazyLoadingViolationError when code reads a relation that was not
+     * eager-loaded — Laravel Eloquent 9's `preventLazyLoading()`. Global and
+     * off by default; typically: `Model.preventLazyLoading(!isProduction)`.
+     */
+    static preventLazyLoading(enabled = true) { LAZY_LOADING_PREVENTED = enabled }
+
     static scope(name, ...args) {
         const method = `scope${toPascalCase(name)}`
         if (typeof this[method] !== 'function') {
@@ -1177,7 +1189,23 @@ const modelProxyHandler = {
         if (ownDescriptor) {
             if (typeof ownDescriptor.value === 'function') {
                 // Return the function bound to receiver (the proxy) so `this.x` reads attrs
-                return ownDescriptor.value.bind(receiver)
+                const fn = ownDescriptor.value.bind(receiver)
+                // Tag any Relation this method returns with the (model, name) that
+                // produced it — but only when the guard is on and it wasn't eager
+                // loaded (an eager-loaded relation never reaches this branch: the
+                // relationLoaded() check above already returned its value). The
+                // guard itself is enforced later, in Relation.getQuery().
+                if (LAZY_LOADING_PREVENTED && !target.relationLoaded(prop)) {
+                    return (...args) => {
+                        const result = fn(...args)
+                        if (result && typeof result.getQuery === 'function'
+                            && typeof result.get === 'function' && typeof result.then === 'function') {
+                            result._lazyGuard = { model: target, relation: prop }
+                        }
+                        return result
+                    }
+                }
+                return fn
             }
             if (ownDescriptor.get) {
                 const value = ownDescriptor.get.call(receiver)

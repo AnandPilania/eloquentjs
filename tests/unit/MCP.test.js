@@ -18,6 +18,33 @@ const mockFs = {
 }
 jest.unstable_mockModule('fs', () => mockFs)
 
+// ─── Mock the model-loading path used by handleQueryModel so its 100-row cap
+// can be tested without a real DB or model files. ─────────────────────────────
+let capturedLimit
+const QUERY_MODEL_ALL_ROWS = Array.from({ length: 150 }, (_, i) => ({
+  id: i,
+  toJSON() { return { id: i } },
+}))
+class FakeQueryBuilder {
+  constructor(rows) { this.rows = rows; this._limit = undefined }
+  where()   { return this }
+  orderBy() { return this }
+  offset()  { return this }
+  with()    { return this }
+  limit(n)  { capturedLimit = n; this._limit = n; return this }
+  async count() { return this.rows.length }
+  async get()   { return this._limit != null ? this.rows.slice(0, this._limit) : this.rows.slice() }
+}
+class FakeQueryModelClass {
+  static query() { return new FakeQueryBuilder(QUERY_MODEL_ALL_ROWS) }
+}
+jest.unstable_mockModule('@eloquentjs/cli/utils', () => ({
+  resolveConfig: () => ({ paths: { models: 'models' } }),
+}))
+jest.unstable_mockModule('@eloquentjs/codegen/render', () => ({
+  loadModelsByName: async () => [FakeQueryModelClass],
+}))
+
 // ─── Import modules ───────────────────────────────────────────────────────────
 const { MessageParser, encodeMessage, makeResult, makeError,
         makeNotification, ErrorCode } =
@@ -582,13 +609,25 @@ describe('handleNlpCrud', () => {
     }
   })
 
-  test('execute mode returns safety warning', async () => {
+  test('execute mode returns a warning that execute is not implemented (never a fictitious CLI flag)', async () => {
     const result = await handleNlpCrud({
       instruction: 'create a User named Test',
       execute: true,
     }, emptyCtx)
     expect(result.warning).toBeTruthy()
-    expect(result.warning.toLowerCase()).toContain('safe')
+    expect(result.warning.toLowerCase()).toContain('not implemented')
+    // Regression: nlp_crud is an MCP tool, not a CLI command — the warning must
+    // never reference a nonexistent CLI flag like --confirm.
+    expect(result.warning).not.toContain('--confirm')
+  })
+
+  test('nlp_crud never actually executes anything, regardless of execute', async () => {
+    const result = await handleNlpCrud({
+      instruction: 'delete all Posts older than 30 days',
+      execute: true,
+    }, emptyCtx)
+    expect(result.executed).toBeUndefined()
+    expect(result.data).toBeUndefined()
   })
 
   test('result includes note about reviewing code', async () => {
@@ -629,5 +668,33 @@ describe('handleRunRawQuery safety', () => {
     await expect(
       handleRunRawQuery({ sql: 'DELETE FROM users WHERE 1=1' }, emptyCtx)
     ).rejects.toThrow(/SELECT/)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// query_model — row cap (regression: omitting `limit` must still cap at 100)
+// ─────────────────────────────────────────────────────────────────────────────
+describe('handleQueryModel row cap', () => {
+  beforeEach(() => { capturedLimit = undefined })
+
+  test('caps at 100 rows even when limit is omitted entirely', async () => {
+    const { handleQueryModel } = await import('../../packages/mcp/src/tools/query.js')
+    const result = await handleQueryModel({ model: 'User' }, emptyCtx)
+    expect(capturedLimit).toBe(100)
+    expect(result.data.length).toBe(100)
+  })
+
+  test('still caps at 100 when the caller asks for more', async () => {
+    const { handleQueryModel } = await import('../../packages/mcp/src/tools/query.js')
+    const result = await handleQueryModel({ model: 'User', limit: 500 }, emptyCtx)
+    expect(capturedLimit).toBe(100)
+    expect(result.data.length).toBe(100)
+  })
+
+  test('respects an explicit limit below 100', async () => {
+    const { handleQueryModel } = await import('../../packages/mcp/src/tools/query.js')
+    const result = await handleQueryModel({ model: 'User', limit: 5 }, emptyCtx)
+    expect(capturedLimit).toBe(5)
+    expect(result.data.length).toBe(5)
   })
 })

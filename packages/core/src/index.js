@@ -16,7 +16,8 @@ export {
     MassAssignmentException,
     ValidationException,
     PolicyException,
-    RelationNotFoundException
+    RelationNotFoundException,
+    LazyLoadingViolationError
 } from './errors.js'
 
 // Query builder + Collection

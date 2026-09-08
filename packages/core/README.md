@@ -93,6 +93,8 @@ class User extends Model {
   static globalScopes = {
     tenanted: qb => qb.where('tenant_id', currentTenantId()),
   }
+  // Opt out per query: await User.query().withoutGlobalScope('tenanted').get()
+  // Opt out per query: await User.query().withoutGlobalScope('tenanted').get()
 
   // ── Lifecycle Hooks ──────────────────────────────────────────────────────
   // Returning false from a "-ing" hook cancels the operation.
@@ -194,6 +196,7 @@ await User.distinct().pluck('country')
 await User.join('profiles', 'users.id', '=', 'profiles.user_id').get()
 await User.leftJoin('posts', 'users.id', '=', 'posts.user_id').get()
 await User.rightJoin('orders', 'users.id', '=', 'orders.user_id').get()
+await User.crossJoin('countries').get()
 
 // GROUP BY / HAVING
 await User.groupBy('country').select('country').count()
@@ -218,6 +221,11 @@ const page = await User.paginate(1, 20)
 const first = await User.cursorPaginate(20)
 // { data: User[], meta: { per_page, next_cursor, has_more } }
 const next = await User.query().cursorPaginate(20, first.meta.next_cursor)
+
+// simplePaginate: no COUNT query — fetches perPage+1 rows to learn has_more.
+// Cheaper than paginate() on large tables, but no `total`/`last_page`.
+const simple = await User.simplePaginate(1, 20)
+// { data: User[], meta: { per_page, current_page, from, to, has_more } }
 
 // UNION — combines two queries; this builder's ORDER BY/LIMIT apply to the
 // combined result. Not supported on MongoDB (no find() equivalent).
@@ -249,6 +257,7 @@ const [count, page] = await Promise.all([base.clone().count(), base.clone().pagi
 
 // LOCKING
 await User.query().where('id', 1).lockForUpdate().first()
+await User.query().where('id', 1).sharedLock().first()
 
 // RAW
 await User.whereRaw('age > ?', [18]).get()
@@ -269,6 +278,9 @@ injection point. Anything outside the list throws; use `whereRaw()` for the rest
 ```js
 // Create
 const user = await User.create({ name: 'Alice', email: 'a@b.com' })
+
+// Bulk insert, no hydration — returns raw rows, one round trip
+await User.insert([{ name: 'Bob' }, { name: 'Carol' }])
 
 // Update
 await user.update({ name: 'Alicia' })
@@ -437,7 +449,20 @@ user.posts().getQuery()    // the underlying QueryBuilder, if you need it
 ```js
 await User.whereHas('posts').get()
 await User.whereHas('posts', qb => qb.where('published', true)).get()
+await User.orWhereHas('posts', qb => qb.where('published', true)).get()
 await User.whereDoesntHave('posts').get()
+await User.has('posts').get()             // alias for whereHas
+await User.doesntHave('posts').get()      // alias for whereDoesntHave
+
+// Compare two columns on the same row
+await User.whereColumn('updated_at', '>', 'created_at').get()
+
+// Compare the time-of-day part only
+await User.whereTime('created_at', '>', '09:00:00').get()
+
+// EXISTS / NOT EXISTS — a correlated subquery against another model
+await User.whereExists(Post, qb => qb.whereColumn('user_id', 'users.id')).get()
+await User.whereNotExists(Post, qb => qb.whereColumn('user_id', 'users.id')).get()
 
 const users = await User.withCount('posts').get()
 users[0].posts_count       // one aggregate query for the whole batch
@@ -445,6 +470,48 @@ users[0].posts_count       // one aggregate query for the whole batch
 await User.withSum('orders', 'total').get()   // orders_sum_total
 await User.withExists('posts').get()          // posts_exists
 ```
+
+---
+
+## Preventing N+1 (Lazy Loading Guard)
+
+`Model.preventLazyLoading()` throws `LazyLoadingViolationError` instead of
+silently querying when code reads a relation that wasn't eager-loaded — the
+same idea as Laravel Eloquent 9's `preventLazyLoading()`. Off by default,
+global, so flip it once at boot:
+
+```js
+import { Model } from '@eloquentjs/core'
+
+Model.preventLazyLoading(!isProduction)   // throw in dev/test, stay lenient in prod
+
+const posts = await Post.all()            // 'author' not eager-loaded
+await posts[0].author().get()             // throws LazyLoadingViolationError
+
+const eager = await Post.with('author').all()
+await eager[0].author().get()             // fine — 'author' was eager-loaded
+```
+
+---
+
+## Query Logging
+
+`DB.listen(callback)` fires `callback({ sql, params, ms, connection })` after
+every resolver-level query, on every connection — useful for a slow-query log
+or request-scoped query counting.
+
+```js
+import { DB } from '@eloquentjs/core'
+
+DB.listen(({ sql, ms }) => {
+  if (ms > 100) console.warn(`Slow query (${ms.toFixed(1)}ms): ${sql}`)
+})
+```
+
+`DB.forgetListeners()` removes every registered listener. `sql`/`params` are
+best-effort (only rendered for `select`s, via the resolver's own `toSQL()`);
+`ms` and `connection` are always present, and a listener throwing never
+breaks the query it observed.
 
 ---
 
@@ -494,9 +561,14 @@ users.modelKeys()                // Collection of primary keys
 users.where('is_admin', true)
 users.whereIn('role', ['admin', 'editor'])
 users.contains('email', 'a@b.com')
+users.doesntContain('email', 'a@b.com')
 users.partition(u => u.is_admin) // [admins, others]
 users.sortBy('name')
 users.sortBy('age', 'desc')
+users.sortByDesc('age')          // same as sortBy('age', 'desc')
+users.nth(2)                     // element at index 2, or null
+users.isEmpty()
+users.isNotEmpty()
 users.chunk(10)                  // Collection of Collections
 users.sum('balance')
 users.avg('score')
@@ -509,6 +581,7 @@ users.shuffle()
 users.only('id', 'name', 'email')
 users.except('password')
 users.mapInto(UserDTO)
+users.flatten()                  // one level, like Array.flat()
 users.each(user => ...)          // return false to stop
 users.tap(col => console.log(col.length))
 users.when(condition, col => col.where('active', true))
@@ -572,6 +645,11 @@ One instance per cast class is shared, so `this` inside a cast is stable and a
 `serialize()` that uses it works. Cast instances are not created per attribute
 access.
 
+`int`, `biginteger`, `bool`, `datetime`, `timestamp`, `array`, `object` and
+`jsonb` are aliases for `integer`/`boolean`/`date`/`json` above; `double` and
+`real` alias `float`. `binary` and `uuid` are additional built-in casts,
+usable the same way: `static casts = { id: 'uuid', payload: 'binary' }`.
+
 ---
 
 ## Migrations
@@ -590,6 +668,9 @@ export default class CreateUsersTable extends Migration {
       t.timestamp('verified_at').nullable()
       t.timestamp('seen_at').useCurrent()     // Expr.now, rendered per driver
       t.foreignId('role_id').cascadeOnDelete().constrained('roles')
+      t.enum('status', ['active', 'banned']).default('active')
+      t.morphs('imageable')             // imageable_id + imageable_type, indexed
+      // t.nullableMorphs('imageable')  // same, but both columns nullable
       t.timestamps()
       t.softDeletes()
     })
@@ -612,6 +693,8 @@ await Schema.table('users', t => {
   t.dropColumn('legacy_flag')
   t.renameColumn('bio', 'about')
   t.dropUnique('users_email_unique')
+  t.dropForeign('posts_user_id_foreign')   // or dropForeign('user_id')
+  t.dropPrimary()
 })
 ```
 
@@ -733,6 +816,7 @@ class UserFactory extends Factory {
 const user  = await UserFactory.new().create()
 const admin = await UserFactory.new().admin().create()
 const users = await UserFactory.new().count(50).create()   // a Collection
+const same  = await UserFactory.new().times(50).create()   // alias for count()
 
 // Cycle values across rows
 await UserFactory.new().count(4).sequence({ role: 'admin' }, { role: 'editor' }).create()
@@ -740,6 +824,17 @@ await UserFactory.new().count(4).sequence({ role: 'admin' }, { role: 'editor' })
 // Relations
 await UserFactory.new().has(PostFactory.new().count(3), 'posts').create()
 await PostFactory.new().count(5).for(user, 'author').create()
+
+// Reuse one already-built related model across every row instead of a fresh
+// one each time — Laravel's recycle()
+await PostFactory.new().count(5).recycle(user).create()
+
+// Hooks, run per model
+UserFactory.new().afterMaking(user => { user.slug = slugify(user.name) })
+UserFactory.new().afterCreating(async user => { await user.profile().create({}) })
+
+// Explicit rows instead of definition() + state()
+await UserFactory.new().createMany([{ name: 'Alice' }, { name: 'Bob' }])
 
 // Just the attributes, or a model without saving, or no events
 const attrs = UserFactory.new().raw()
@@ -779,9 +874,11 @@ class UserSeeder extends Seeder {
 ```js
 import { errors } from '@eloquentjs/core'
 
-// ModelNotFoundException   — thrown by findOrFail(), firstOrFail()
-// ValidationException      — thrown by Validator.validated()
-// MassAssignmentException  — thrown on guarded attribute write
+// ModelNotFoundException     — thrown by findOrFail(), firstOrFail()
+// ValidationException        — thrown by Validator.validated()
+// MassAssignmentException    — thrown on guarded attribute write
+// LazyLoadingViolationError  — thrown by an unloaded relation read when
+//                              Model.preventLazyLoading() is on
 ```
 
 ---

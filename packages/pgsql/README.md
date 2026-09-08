@@ -184,6 +184,7 @@ await Schema.table('users', t => {
 
 // Other operations
 await Schema.dropIfExists('old_table')
+await Schema.drop('old_table', { cascade: true })  // adds CASCADE, dropping dependent objects too
 await Schema.rename('old_name', 'new_name')
 await Schema.hasTable('users')                   // → true/false
 await Schema.hasColumn('users', 'email')         // → true/false
@@ -194,10 +195,10 @@ await Schema.getColumnListing('users')           // → ['id', 'name', ...]
 
 ## Migration Concurrency Protection
 
-When running migrations from multiple processes simultaneously (e.g. two deploy pipelines), EloquentJS uses PostgreSQL advisory locks to ensure only one process runs migrations at a time:
+When migrations are run via `eloquent migrate`, the CLI's migration runner uses this driver's connection to take a PostgreSQL advisory lock, so multiple processes migrating simultaneously (e.g. two deploy pipelines) don't run migrations at the same time:
 
 ```js
-// Handled automatically by `eloquent migrate`
+// Handled automatically by `eloquent migrate` (see @eloquentjs/cli)
 // If another process is already migrating:
 // → throws "Another migration process is running. Please wait and try again."
 ```
@@ -210,9 +211,9 @@ When running migrations from multiple processes simultaneously (e.g. two deploy 
 |---|---|---|
 | `host` | `localhost` | PostgreSQL server host |
 | `port` | `5432` | PostgreSQL port |
-| `database` | — | Database name (required) |
-| `user` | — | Username (required) |
-| `password` | — | Password |
+| `database` | — | Database name (required). Alias: `db` |
+| `user` | — | Username (required). Alias: `username` |
+| `password` | — | Password. Alias: `pass` |
 | `ssl` | `false` | Enable TLS/SSL |
 | `max` | `10` | Max pool connections |
 | `min` | `0` | Min pool connections |

@@ -8,6 +8,15 @@
  * NOTE: MongoDB is schemaless — migrations are unsupported and will throw a
  * clear error. SQL drivers use a common migration table with driver-specific
  * DDL where needed.
+ *
+ * NOTE: MySQL's DDL statements (CREATE TABLE, ALTER TABLE, ...) implicitly
+ * commit any open transaction, so a MySQL migration cannot get the same
+ * all-or-nothing guarantee pgsql/sqlite get from wrapping up()/down() in a
+ * transaction — a MySQL migration that fails partway through can still leave
+ * a partially-applied schema change. MySQL migrations run un-transactioned.
+ * MySQL also has no pg_advisory_lock equivalent wired through the driver, so
+ * concurrent-run protection there uses MySQL's named locks (GET_LOCK/RELEASE_LOCK)
+ * instead.
  */
 
 import { resolve } from 'path'
@@ -23,6 +32,17 @@ function getDriver(ctx) {
 
 function isSqlite(ctx) {
     return getDriver(ctx) === 'sqlite'
+}
+
+function isMysql(ctx) {
+    return getDriver(ctx) === 'mysql'
+}
+
+// pgsql (and sqlite, which also accepts $-style per its raw() docstring) use
+// $1/$2 positional placeholders; mysql2's raw `?` placeholders are literal
+// and not translated, so mysql needs its own placeholder style.
+function placeholder(ctx, n) {
+    return isMysql(ctx) ? '?' : `$${n}`
 }
 
 function assertSqlDriver(ctx) {
@@ -54,6 +74,13 @@ function quoteIdent(name) {
 
 async function acquireLock(connection, ctx) {
     if (isSqlite(ctx)) return true
+    if (isMysql(ctx)) {
+        // GET_LOCK(name, timeout): 1 if acquired, 0 on timeout, NULL on error.
+        // timeout 0 makes it non-blocking, mirroring pg_try_advisory_lock.
+        const rows = await connection.raw(`SELECT GET_LOCK(?, 0) AS acquired`, [String(MIGRATION_LOCK_KEY)])
+        const result = rows.rows ?? rows
+        return result[0]?.acquired === 1
+    }
     // pg_try_advisory_lock returns false immediately if lock is taken
     const rows = await connection.raw(`SELECT pg_try_advisory_lock($1) AS acquired`, [MIGRATION_LOCK_KEY])
     const result = rows.rows ?? rows
@@ -62,6 +89,10 @@ async function acquireLock(connection, ctx) {
 
 async function releaseLock(connection, ctx) {
     if (isSqlite(ctx)) return
+    if (isMysql(ctx)) {
+        await connection.raw(`SELECT RELEASE_LOCK(?)`, [String(MIGRATION_LOCK_KEY)]).catch(() => { })
+        return
+    }
     await connection.raw(`SELECT pg_advisory_unlock($1)`, [MIGRATION_LOCK_KEY]).catch(() => { })
 }
 
@@ -74,6 +105,18 @@ async function ensureMigrationsTable(connection, ctx) {
       migration  TEXT    NOT NULL UNIQUE,
       batch      INTEGER NOT NULL,
       ran_at     TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+        return
+    }
+
+    if (isMysql(ctx)) {
+        await connection.raw(`
+    CREATE TABLE IF NOT EXISTS _migrations (
+      id         INT AUTO_INCREMENT PRIMARY KEY,
+      migration  VARCHAR(255) NOT NULL UNIQUE,
+      batch      INT          NOT NULL,
+      ran_at     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `)
         return
@@ -96,16 +139,16 @@ async function getRanMigrations(connection) {
 }
 
 // ─── Record a migration as run ────────────────────────────────────────────
-async function recordMigration(connection, name, batch) {
+async function recordMigration(connection, name, batch, ctx) {
     await connection.raw(
-        `INSERT INTO _migrations (migration, batch) VALUES ($1, $2)`,
+        `INSERT INTO _migrations (migration, batch) VALUES (${placeholder(ctx, 1)}, ${placeholder(ctx, 2)})`,
         [name, batch]
     )
 }
 
 // ─── Remove a migration record ────────────────────────────────────────────
-async function removeMigration(connection, name) {
-    await connection.raw(`DELETE FROM _migrations WHERE migration = $1`, [name])
+async function removeMigration(connection, name, ctx) {
+    await connection.raw(`DELETE FROM _migrations WHERE migration = ${placeholder(ctx, 1)}`, [name])
 }
 
 // ─── Get next batch number ────────────────────────────────────────────────
@@ -157,8 +200,21 @@ export async function runMigrations(ctx) {
                 const module = await import(fileUrl.href)
                 const MigrationClass = module.default
                 const instance = new MigrationClass()
-                await instance.up()
-                await recordMigration(connection, mig.filename, batch)
+
+                if (isMysql(ctx)) {
+                    // No transactional safety net here — see file-header note.
+                    await instance.up()
+                    await recordMigration(connection, mig.filename, batch, ctx)
+                } else {
+                    // Run up() and the _migrations record in one transaction so a
+                    // migration that fails partway through leaves no trace and no
+                    // partially-applied schema change.
+                    await connection.transaction(async (tx) => {
+                        await instance.up()
+                        await recordMigration(tx, mig.filename, batch, ctx)
+                    })
+                }
+
                 success(`Migrated: ${mig.filename}`)
                 ran++
             } catch (err) {
@@ -182,44 +238,65 @@ export async function rollbackMigrations(ctx, { step = 1 } = {}) {
     const connection = await openConnection(ctx)
 
     await ensureMigrationsTable(connection, ctx)
-    const ranMigrations = await getRanMigrations(connection)
 
-    if (ranMigrations.length === 0) {
-        info('Nothing to rollback.')
-        return { rolledBack: 0 }
+    // Prevent concurrent rollback/reset operations from racing each other
+    // (and with a concurrent runMigrations) the same way runMigrations does.
+    const locked = await acquireLock(connection, ctx).catch(() => false)
+    if (!locked) {
+        throw new Error('Another migration process is running. Please wait and try again.')
     }
 
-    // Find the batches to roll back
-    const maxBatch = Math.max(...ranMigrations.map(r => r.batch))
-    const targetBatch = maxBatch - step + 1
-    const toRollback = ranMigrations
-        .filter(r => r.batch >= targetBatch)
-        .reverse() // rollback in reverse order
+    try {
+        const ranMigrations = await getRanMigrations(connection)
 
-    let rolledBack = 0
-
-    for (const record of toRollback) {
-        const migFile = resolve(migrationsDir, record.migration)
-        if (!existsSync(migFile)) {
-            warn(`Migration file not found, skipping: ${record.migration}`)
-            continue
+        if (ranMigrations.length === 0) {
+            info('Nothing to rollback.')
+            return { rolledBack: 0 }
         }
 
-        try {
-            const module = await import(pathToFileURL(migFile).href)
-            const MigrationClass = module.default
-            const instance = new MigrationClass()
-            await instance.down()
-            await removeMigration(connection, record.migration)
-            success(`Rolled back: ${record.migration}`)
-            rolledBack++
-        } catch (err) {
-            error(`Failed to rollback: ${record.migration}`)
-            throw err
+        // Find the batches to roll back
+        const maxBatch = Math.max(...ranMigrations.map(r => r.batch))
+        const targetBatch = maxBatch - step + 1
+        const toRollback = ranMigrations
+            .filter(r => r.batch >= targetBatch)
+            .reverse() // rollback in reverse order
+
+        let rolledBack = 0
+
+        for (const record of toRollback) {
+            const migFile = resolve(migrationsDir, record.migration)
+            if (!existsSync(migFile)) {
+                warn(`Migration file not found, skipping: ${record.migration}`)
+                continue
+            }
+
+            try {
+                const module = await import(pathToFileURL(migFile).href)
+                const MigrationClass = module.default
+                const instance = new MigrationClass()
+
+                if (isMysql(ctx)) {
+                    await instance.down()
+                    await removeMigration(connection, record.migration, ctx)
+                } else {
+                    await connection.transaction(async (tx) => {
+                        await instance.down()
+                        await removeMigration(tx, record.migration, ctx)
+                    })
+                }
+
+                success(`Rolled back: ${record.migration}`)
+                rolledBack++
+            } catch (err) {
+                error(`Failed to rollback: ${record.migration}`)
+                throw err
+            }
         }
+
+        return { rolledBack }
+    } finally {
+        await releaseLock(connection, ctx)
     }
-
-    return { rolledBack }
 }
 
 // ─── Rollback ALL migrations ──────────────────────────────────────────────
@@ -231,38 +308,59 @@ export async function resetMigrations(ctx) {
     const connection = await openConnection(ctx)
 
     await ensureMigrationsTable(connection, ctx)
-    const ranMigrations = await getRanMigrations(connection)
 
-    if (ranMigrations.length === 0) {
-        info('Nothing to reset.')
-        return { rolledBack: 0 }
+    // Prevent concurrent rollback/reset operations from racing each other
+    // (and with a concurrent runMigrations) the same way runMigrations does.
+    const locked = await acquireLock(connection, ctx).catch(() => false)
+    if (!locked) {
+        throw new Error('Another migration process is running. Please wait and try again.')
     }
 
-    const reversed = [...ranMigrations].reverse()
-    let rolledBack = 0
+    try {
+        const ranMigrations = await getRanMigrations(connection)
 
-    for (const record of reversed) {
-        const migFile = resolve(migrationsDir, record.migration)
-        if (!existsSync(migFile)) {
-            warn(`Migration file not found, skipping: ${record.migration}`)
-            continue
+        if (ranMigrations.length === 0) {
+            info('Nothing to reset.')
+            return { rolledBack: 0 }
         }
 
-        try {
-            const module = await import(pathToFileURL(migFile).href)
-            const MigrationClass = module.default
-            const instance = new MigrationClass()
-            await instance.down()
-            await removeMigration(connection, record.migration)
-            success(`Rolled back: ${record.migration}`)
-            rolledBack++
-        } catch (err) {
-            error(`Failed to rollback: ${record.migration}`)
-            throw err
+        const reversed = [...ranMigrations].reverse()
+        let rolledBack = 0
+
+        for (const record of reversed) {
+            const migFile = resolve(migrationsDir, record.migration)
+            if (!existsSync(migFile)) {
+                warn(`Migration file not found, skipping: ${record.migration}`)
+                continue
+            }
+
+            try {
+                const module = await import(pathToFileURL(migFile).href)
+                const MigrationClass = module.default
+                const instance = new MigrationClass()
+
+                if (isMysql(ctx)) {
+                    await instance.down()
+                    await removeMigration(connection, record.migration, ctx)
+                } else {
+                    await connection.transaction(async (tx) => {
+                        await instance.down()
+                        await removeMigration(tx, record.migration, ctx)
+                    })
+                }
+
+                success(`Rolled back: ${record.migration}`)
+                rolledBack++
+            } catch (err) {
+                error(`Failed to rollback: ${record.migration}`)
+                throw err
+            }
         }
+
+        return { rolledBack }
+    } finally {
+        await releaseLock(connection, ctx)
     }
-
-    return { rolledBack }
 }
 
 // ─── Get migration status ─────────────────────────────────────────────────
@@ -290,17 +388,29 @@ export async function dropAllTables(ctx) {
     const connection = await openConnection(ctx)
 
     const sqlite = isSqlite(ctx)
+    const mysql = isMysql(ctx)
 
     // Get all user tables
-    const rows = sqlite ? await connection.raw(`
+    let rows
+    if (sqlite) {
+        rows = await connection.raw(`
     SELECT name AS tablename FROM sqlite_master
     WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
     ORDER BY name
-  `) : await connection.raw(`
+  `)
+    } else if (mysql) {
+        rows = await connection.raw(`
+    SELECT table_name AS tablename FROM information_schema.tables
+    WHERE table_schema = DATABASE()
+    ORDER BY table_name
+  `)
+    } else {
+        rows = await connection.raw(`
     SELECT tablename FROM pg_tables
     WHERE schemaname = 'public'
     ORDER BY tablename
   `)
+    }
     const tables = (rows.rows ?? rows).map(r => r.tablename)
 
     if (tables.length === 0) {
@@ -310,13 +420,18 @@ export async function dropAllTables(ctx) {
 
     // Disable FK checks, drop all, re-enable
     if (sqlite) await connection.raw(`PRAGMA foreign_keys = OFF`)
+    else if (mysql) await connection.raw(`SET FOREIGN_KEY_CHECKS = 0`)
     else await connection.raw(`SET session_replication_role = 'replica'`)
     for (const table of tables) {
         const quotedTable = quoteIdent(table)
-        await connection.raw(sqlite ? `DROP TABLE IF EXISTS ${quotedTable}` : `DROP TABLE IF EXISTS ${quotedTable} CASCADE`)
+        const dropSql = sqlite || mysql
+            ? `DROP TABLE IF EXISTS ${quotedTable}`
+            : `DROP TABLE IF EXISTS ${quotedTable} CASCADE`
+        await connection.raw(dropSql)
         success(`Dropped table: ${table}`)
     }
     if (sqlite) await connection.raw(`PRAGMA foreign_keys = ON`)
+    else if (mysql) await connection.raw(`SET FOREIGN_KEY_CHECKS = 1`)
     else await connection.raw(`SET session_replication_role = 'DEFAULT'`)
 
     return { dropped: tables.length }

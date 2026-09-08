@@ -780,7 +780,7 @@ export const helpTools = [
         execute: {
           type: 'boolean',
           default: false,
-          description: 'If true, execute the operation (requires DB connection and write permissions).',
+          description: 'Not implemented — nlp_crud never executes anything, regardless of this flag. Setting it to true only adds a warning to the result explaining that. Use the returned generatedCode to run the operation yourself.',
         },
         modelsDir: { type: 'string' },
       },
@@ -999,8 +999,8 @@ export async function handleNlpCrud(args, ctx) {
     note: 'Review and adjust field names/values before executing.',
   }
 
-  if (args.execute && parsed.operation !== 'unknown') {
-    result.warning = 'Execute mode for CRUD is disabled by default for safety. Remove this warning and add --confirm flag to enable.'
+  if (args.execute) {
+    result.warning = 'Execute mode for nlp_crud is not implemented — this tool only generates code for CRUD operations, it never runs them. Review the generatedCode above and run it yourself (e.g. via run_raw_query for reads, or your own application code for writes).'
   }
 
   return result

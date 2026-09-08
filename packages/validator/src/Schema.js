@@ -183,16 +183,20 @@ class ArraySchema extends FieldSchema {
   size(n)     { this._arrRules.push(`size:${n}`); return this }
 
   /**
-   * Compile with wildcard item validation.
-   * Returns rules for the array field itself, plus item rules as 'items.*.field'.
+   * Compile the item schema (if any) into wildcard rules/messages for
+   * `${field}.*` (or `${field}.*.x` for object items), using the
+   * Validator's dot-notation wildcard expansion.
+   * @param {string} field
+   * @returns {{ rules: object, messages: object }|null}
    */
-  compile(field) {
-    const base = super.compile(field)
-    if (!this._itemSchema) return base
-
-    // If itemSchema is a primitive (e.g. v.string()), validate each index
-    // In practice this is handled by the schema-level expand
-    return base
+  compileItems(field) {
+    if (!this._itemSchema) return null
+    const itemField = `${field}.*`
+    if (this._itemSchema instanceof ObjectSchema) {
+      return this._itemSchema.compileNested(itemField)
+    }
+    const { rules, messages } = this._itemSchema.compile(itemField)
+    return { rules: { [itemField]: rules }, messages }
   }
 }
 
@@ -258,6 +262,14 @@ class Schema {
           const { rules: r, messages: m } = schema.compile(fullKey)
           rules[fullKey] = r
           Object.assign(messages, m)
+
+          if (schema instanceof ArraySchema) {
+            const items = schema.compileItems(fullKey)
+            if (items) {
+              Object.assign(rules, items.rules)
+              Object.assign(messages, items.messages)
+            }
+          }
         }
 
         if (schema._label) attributes[fullKey] = schema._label
