@@ -38,7 +38,7 @@ function instrument(resolver, connectionName) {
   return new Proxy(resolver, {
     get(target, prop, receiver) {
       const value = Reflect.get(target, prop, receiver)
-      if (typeof value !== 'function' || !_QUERY_METHODS.has(prop)) return value
+      if (typeof value !== 'function' || typeof prop !== 'string' || !_QUERY_METHODS.has(prop)) return value
 
       return async function (...args) {
         const start = performance.now()

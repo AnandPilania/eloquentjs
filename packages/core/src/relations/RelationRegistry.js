@@ -63,6 +63,8 @@ class Relation {
         /** @type {((qb: any) => void)[]} */
         this._constraints = []
         this._default = undefined
+        /** @type {{model: any, relation: string} | undefined} */
+        this._lazyGuard = undefined
     }
 
     /**
