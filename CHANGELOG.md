@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.0] — 2026-09-08
+
+### 🔧 Chores
+
+- update readme (`a8c6c14`)
+
+
+---
+
 ## [0.0.9] — 2026-09-01
 
 ### 🐛 Bug Fixes
