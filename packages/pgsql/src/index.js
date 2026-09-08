@@ -40,7 +40,7 @@ function _getPool(connectionName = 'default') {
 // ─── connect() ───────────────────────────────────────────────────────────────
 export async function connect(config = {}, connectionName = 'default') {
     const poolConfig = config.url
-        ? { connectionString: config.url, ssl: config.ssl ?? false }
+        ? { connectionString: config.url, ssl: config.ssl ?? false, types: poolTypes }
         : {
             host: config.host ?? 'localhost',
             port: config.port ?? 5432,
@@ -52,8 +52,8 @@ export async function connect(config = {}, connectionName = 'default') {
             idleTimeoutMillis: config.idleTimeout ?? 30_000,
             connectionTimeoutMillis: config.connectTimeout ?? 2_000,
             ssl: config.ssl ?? false,
+            types: poolTypes,
         }
-    poolConfig.types = poolTypes
 
     // Close existing pool for this name before replacing it
     if (_pools.has(connectionName)) {
