@@ -1,6 +1,6 @@
 {
   "name": "@eloquentjs/mongodb",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "MongoDB driver for EloquentJS",
   "type": "module",
   "main": "src/index.js",
@@ -11,7 +11,7 @@
     }
   },
   "dependencies": {
-    "@eloquentjs/core": ">=0.2.0 <0.3.0"
+    "@eloquentjs/core": ">=0.2.1 <0.3.0"
   },
   "peerDependencies": {
     "mongodb": "^7.1.0"
