@@ -1,6 +1,6 @@
 {
   "name": "@eloquentjs/pgsql",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "PostgreSQL driver for EloquentJS",
   "type": "module",
   "main": "src/index.js",
@@ -11,7 +11,7 @@
     }
   },
   "dependencies": {
-    "@eloquentjs/core": ">=0.2.1 <0.3.0"
+    "@eloquentjs/core": ">=0.2.2 <0.3.0"
   },
   "peerDependencies": {
     "pg": "^8.13.0"
