@@ -690,7 +690,7 @@ function buildWhereClauses(ctx) {
     }
 
     for (const rw of ctx.rawWheres ?? []) {
-        let sql = rw.sql
+        const sql = rw.sql
         for (const b of rw.bindings) { whereParams.push(b) }
         parts.push({ bool: 'AND', clause: sql })
     }
