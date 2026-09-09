@@ -1,6 +1,6 @@
 {
   "name": "@eloquentjs/mcp",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Model Context Protocol server for EloquentJS — lets AI agents query models, run migrations, introspect schemas, and generate code",
   "type": "module",
   "main": "src/index.js",
@@ -33,9 +33,9 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "@eloquentjs/core": ">=0.2.3 <0.3.0",
-    "@eloquentjs/codegen": ">=0.2.3 <0.3.0",
-    "@eloquentjs/cli": ">=0.2.3 <0.3.0",
+    "@eloquentjs/core": ">=0.2.4 <0.3.0",
+    "@eloquentjs/codegen": ">=0.2.4 <0.3.0",
+    "@eloquentjs/cli": ">=0.2.4 <0.3.0",
     "@modelcontextprotocol/sdk": "^1.27.1"
   },
   "author": {

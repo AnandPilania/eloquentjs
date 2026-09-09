@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.4] — 2026-09-09
+
+### 🐛 Bug Fixes
+
+- model for poolstats (`708232a`)
+
+
+---
+
 ## [0.2.3] — 2026-09-09
 
 ### ✨ Features
