@@ -21,6 +21,7 @@ export {
   generateGraphqlSchema,
   generateTypeScriptTypes,
   generateTypeScriptFile,
+  generateModelAugmentation,
   generateOpenApiSpec,
   generateModelStub,
   generateMigrationStub,
@@ -34,6 +35,7 @@ export {
   loadModelsByName,
   renderGraphql,
   renderTypeScript,
+  renderModelAugmentations,
   renderOpenApi,
   renderStubs,
 } from './render.js'

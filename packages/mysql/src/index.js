@@ -110,6 +110,20 @@ export class MySqlResolver {
         this.supportsJoins = true
     }
 
+    /**
+     * Pool occupancy — null on a transaction-scoped resolver (bound to a
+     * connection, not the pool), or if mysql2 ever drops these internals.
+     */
+    poolStats() {
+        const raw = /** @type {any} */ (this.pool).pool ?? this.pool
+        if (!Array.isArray(raw?._allConnections)) return null
+        return {
+            total: raw._allConnections.length,
+            idle: raw._freeConnections.length,
+            waiting: raw._connectionQueue.length,
+        }
+    }
+
     // -- TRANSACTIONS ------------------------------------------------
     /**
      * Check out a dedicated connection, start a transaction on it, and publish

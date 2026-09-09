@@ -16,6 +16,7 @@ import { introspectAll } from './introspect.js'
 import {
   generateGraphqlSchema,
   generateTypeScriptFile,
+  generateModelAugmentation,
   generateOpenApiSpec,
   generateModelStub,
   generateMigrationStub,
@@ -109,6 +110,27 @@ export async function renderTypeScript(opts = {}) {
     writeFileSync(outputFile, ts, 'utf8')
   }
   return ts
+}
+
+/**
+ * Write one `.d.ts` augmentation file beside each model's own source file,
+ * merging its columns and typed statics (query/find/create) onto the class —
+ * see generateModelAugmentation(). Requires `modelsDir` (the augmentation
+ * targets `./${ModelName}.js`, resolved relative to that directory).
+ */
+export async function renderModelAugmentations(opts = {}) {
+  const { models, modelsDir, options = {} } = opts
+  const classes = models ?? await loadModelsFromDir(modelsDir)
+  const schemas = introspectAll(classes)
+  const written = []
+  for (const schema of schemas) {
+    const dts = generateModelAugmentation(schema, options)
+    const outFile = join(modelsDir, `${schema.name}.d.ts`)
+    ensureDir(dirname(outFile))
+    writeFileSync(outFile, dts, 'utf8')
+    written.push(outFile)
+  }
+  return written
 }
 
 /**

@@ -391,6 +391,17 @@ user.roles().as('membership')     // rename it: roles[0].membership
 user.roles().withTimestamps()     // maintain created_at/updated_at on the pivot
 user.roles().wherePivot('assigned_at', '>', someDate)
 
+// Custom pivot model — Laravel's using(). Pivot data becomes an instance of
+// PivotModel (casts/accessors apply) instead of a plain object.
+class RoleUser extends Model {
+  static table = 'user_roles'
+  static casts = { assigned_at: 'date' }
+}
+class User extends Model {
+  roles() { return this.belongsToMany(Role, 'user_roles').using(RoleUser).withPivot('assigned_at') }
+}
+roles[0].pivot.assigned_at   // a real Date, cast by RoleUser
+
 // Has-many-through / has-one-through
 class Country extends Model {
   posts()  { return this.hasManyThrough(Post, User, 'country_id', 'user_id') }
@@ -512,6 +523,31 @@ DB.listen(({ sql, ms }) => {
 best-effort (only rendered for `select`s, via the resolver's own `toSQL()`);
 `ms` and `connection` are always present, and a listener throwing never
 breaks the query it observed.
+
+`DB.poolStats(connection?)` returns `{ total, idle, waiting }` for a
+connection's pool — supported on `@eloquentjs/pgsql` and `@eloquentjs/mysql`;
+`null` on drivers without a real pool (sqlite, mongodb) or on a
+transaction-scoped resolver.
+
+---
+
+## Query-Result Caching
+
+`.remember(seconds, key?)` caches a query's rows in-memory for the given TTL —
+Laravel's `remember()`. Works on any query builder chain, and on relations
+(`user.posts().remember(60).get()`), since it's just another chained call.
+
+```js
+await User.where('active', true).remember(60).get()          // key = query shape
+await User.where('active', true).remember(60, 'active-users').get()  // explicit key
+
+import { DB } from '@eloquentjs/core'
+DB.flushQueryCache()   // clear every cached result
+```
+
+Caches the raw rows, not hydrated models — each call still builds fresh model
+instances (hooks, casts, accessors all still run), only the DB round-trip is
+skipped on a hit.
 
 ---
 

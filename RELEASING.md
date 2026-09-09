@@ -12,7 +12,7 @@ Pushing a `v*` tag triggers the GitHub Actions release workflow which:
 
 1. Runs the full test suite
 2. Validates the version matches the tag
-3. Publishes all 11 packages to npm in dependency order
+3. Publishes all 12 packages to npm in dependency order
 4. Creates a GitHub Release with the changelog entry
 
 ---
@@ -76,7 +76,7 @@ npm run release:patch
 
 This will:
 - Run all tests (fails and exits if any fail)
-- Bump the version in all 12 `package.json` files (root + 11 packages)
+- Bump the version in all 13 `package.json` files (root + 12 packages)
 - Update `CHANGELOG.md` with commits since the last tag
 - Create a git commit: `chore(release): 1.0.1`
 - Create an annotated git tag: `v1.0.1`

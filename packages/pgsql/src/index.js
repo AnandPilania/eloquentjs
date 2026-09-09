@@ -123,6 +123,12 @@ export class PgResolver {
         this._txDepth = 0
     }
 
+    /** Pool occupancy — null on a transaction-scoped resolver (bound to a client, not the pool). */
+    poolStats() {
+        if (typeof this.pool.totalCount !== 'number') return null
+        return { total: this.pool.totalCount, idle: this.pool.idleCount, waiting: this.pool.waitingCount }
+    }
+
     // -- TRANSACTIONS ------------------------------------------------
     /**
      * Check out a dedicated client, BEGIN on it, and publish a resolver bound

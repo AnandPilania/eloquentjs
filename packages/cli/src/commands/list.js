@@ -41,6 +41,7 @@ export async function cmdList() {
                 { cmd: 'generate:graphql', args: '--pagination=relay', desc: 'Use Relay cursor pagination' },
                 { cmd: 'generate:types', args: '', desc: 'Generate TypeScript types (models.d.ts)' },
                 { cmd: 'generate:types', args: '--out=<file>', desc: 'Custom output path' },
+                { cmd: 'generate:types', args: '--per-model', desc: 'Also write a .d.ts beside each model, typing its columns + query()/find()/create()' },
                 { cmd: 'generate:openapi', args: '', desc: 'Generate OpenAPI 3.0 spec (openapi.json)' },
                 { cmd: 'generate:openapi', args: '--format=yaml', desc: 'Output as YAML' },
                 { cmd: 'generate:openapi', args: '--out=<file>', desc: 'Custom output path' },

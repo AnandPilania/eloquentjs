@@ -17,6 +17,7 @@
 
 import { getResolver, inTransaction, listen, forgetListeners } from './ConnectionRegistry.js'
 import { Model } from './Model.js'
+import { flushQueryCache } from './QueryBuilder.js'
 
 /** Anonymous Model subclasses for DB.table(), one per table+connection. */
 const _tableShims = new Map()
@@ -103,5 +104,20 @@ export const DB = {
   /** Remove every registered DB.listen() callback. */
   forgetListeners() {
     forgetListeners()
+  },
+
+  /** Clear every result cached via .remember(). */
+  flushQueryCache() {
+    flushQueryCache()
+  },
+
+  /**
+   * Connection-pool occupancy, when the driver exposes it (pgsql, mysql).
+   * @param {string} connection
+   * @returns {{total: number, idle: number, waiting: number} | null}
+   */
+  poolStats(connection = 'default') {
+    const resolver = getResolver(connection)
+    return typeof resolver.poolStats === 'function' ? resolver.poolStats() : null
   },
 }

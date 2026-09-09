@@ -142,7 +142,7 @@ const CHAINABLE = [
     'limit', 'take', 'offset', 'skip', 'forPage',
     'with', 'join', 'leftJoin', 'rightJoin', 'crossJoin',
     'withTrashed', 'onlyTrashed', 'withoutGlobalScope',
-    'lockForUpdate', 'sharedLock', 'tap',
+    'lockForUpdate', 'sharedLock', 'tap', 'remember',
 ]
 
 // Terminal methods: run against the built query. get/first/lazy/cursor are
@@ -410,6 +410,12 @@ class BelongsToMany extends Relation {
         return this
     }
 
+    /** Hydrate the pivot as an instance of `PivotModel` instead of a plain object. */
+    using(PivotModel) {
+        this._pivotModel = PivotModel
+        return this
+    }
+
     /** Constrain on a pivot column. */
     wherePivot(column, operator, value) {
         if (value === undefined) { value = operator; operator = '=' }
@@ -472,7 +478,7 @@ class BelongsToMany extends Relation {
         }
         // setRelation, NOT setAttribute: as an attribute it would serialise into
         // toJSON() and be written back to the main table on the next save().
-        model.setRelation(this._pivotAccessor, pivot)
+        model.setRelation(this._pivotAccessor, this._pivotModel ? this._pivotModel._hydrate(pivot) : pivot)
         return model
     }
 

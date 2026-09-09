@@ -111,10 +111,11 @@ async function generateTypes(ctx) {
     info(`Output     : ${outFile}`)
     console.log()
 
-    let renderTypeScript, loadModelsFromDir, loadModelsByName
+    let renderTypeScript, renderModelAugmentations, loadModelsFromDir, loadModelsByName
     try {
         const r = await import('@eloquentjs/codegen/render')
         renderTypeScript = r.renderTypeScript
+        renderModelAugmentations = r.renderModelAugmentations
         loadModelsFromDir = r.loadModelsFromDir
         loadModelsByName = r.loadModelsByName
     } catch {
@@ -139,6 +140,11 @@ async function generateTypes(ctx) {
     console.log()
     success(`TypeScript types written: ${outFile}`)
     info(`${ts.split('\n').length} lines, ${models.length} interface${models.length !== 1 ? 's' : ''}`)
+
+    if (flags['per-model']) {
+        const written = await renderModelAugmentations({ models, modelsDir })
+        for (const file of written) success(`Model augmentation written: ${file}`)
+    }
     console.log()
 }
 

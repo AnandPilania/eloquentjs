@@ -15,6 +15,15 @@ import { ModelNotFoundException, RelationNotFoundException } from './errors.js'
 import { assertOperator } from './utils.js'
 import { HookRegistry } from './HookRegistry.js'
 
+// ─── Query-result cache — .remember(seconds, key?) ──────────────────────────
+// A plain Map with lazy TTL expiry (checked on read). No LRU/size cap —
+// ponytail: add one if memory growth is ever reported.
+const _queryCache = new Map()
+
+export function flushQueryCache() {
+  _queryCache.clear()
+}
+
 /**
  * @template {typeof import('./Model.js').Model} [T=typeof import('./Model.js').Model]
  */
@@ -42,6 +51,7 @@ export class QueryBuilder {
     this._lock      = null
     this._unions    = []       // {table, ctx, all}
     this._globalScopes  = {}   // name -> scope fn (for withoutGlobalScope)
+    this._remember  = null     // {seconds, key} set via .remember()
   }
 
   /**
@@ -66,7 +76,25 @@ export class QueryBuilder {
     qb._lock = this._lock
     qb._unions = [...this._unions]
     qb._globalScopes = { ...this._globalScopes }
+    qb._remember = this._remember
     return qb
+  }
+
+  /** Cache this query's result for `seconds`. Laravel's remember(). */
+  remember(seconds, key = null) {
+    this._remember = { seconds, key }
+    return this
+  }
+
+  /** select(), transparently cached when .remember() was called. */
+  async _select(table, ctx) {
+    if (!this._remember) return this._resolver.select(table, ctx)
+    const cacheKey = this._remember.key ?? `${table}:${JSON.stringify(ctx)}`
+    const hit = _queryCache.get(cacheKey)
+    if (hit && hit.expires > Date.now()) return hit.rows
+    const rows = await this._resolver.select(table, ctx)
+    _queryCache.set(cacheKey, { rows, expires: Date.now() + this._remember.seconds * 1000 })
+    return rows
   }
 
   // ─── WHERE ───────────────────────────────────────────────────────────────────
@@ -480,7 +508,7 @@ export class QueryBuilder {
   // ─── EXECUTION ───────────────────────────────────────────────────────────────
   /** @returns {Promise<Collection<InstanceType<T>>>} */
   async get() {
-    const rows = await this._resolver.select(this._model.getTable(), this._buildContext())
+    const rows = await this._select(this._model.getTable(), this._buildContext())
     return new Collection(await this._hydrateAll(rows))
   }
 
@@ -497,7 +525,7 @@ export class QueryBuilder {
   /** @returns {Promise<InstanceType<T> | null>} */
   async first() {
     const ctx = { ...this.clone()._buildContext(), limit: 1 }
-    const rows = await this._resolver.select(this._model.getTable(), ctx)
+    const rows = await this._select(this._model.getTable(), ctx)
     if (!rows.length) return null
     return (await this._hydrateAll(rows))[0]
   }
@@ -512,7 +540,7 @@ export class QueryBuilder {
   /** Exactly one row, or throw — Laravel's sole(). */
   async sole() {
     const ctx = { ...this.clone()._buildContext(), limit: 2 }
-    const rows = await this._resolver.select(this._model.getTable(), ctx)
+    const rows = await this._select(this._model.getTable(), ctx)
     if (!rows.length) throw new ModelNotFoundException(`No ${this._model.name} record found`)
     if (rows.length > 1) throw new Error(`[EloquentJS] Multiple ${this._model.name} records matched sole()`)
     return (await this._hydrateAll(rows))[0]
@@ -535,14 +563,14 @@ export class QueryBuilder {
    */
   async pluck(column, keyBy = null) {
     const ctx = { ...this._buildContext(), selects: keyBy ? [column, keyBy] : [column] }
-    const rows = await this._resolver.select(this._model.getTable(), ctx)
+    const rows = await this._select(this._model.getTable(), ctx)
     if (keyBy) return new Map(rows.map(r => [r[keyBy], r[column]]))
     return rows.map(r => r[column])
   }
 
   async value(column) {
     const ctx = { ...this._buildContext(), selects: [column], limit: 1 }
-    const rows = await this._resolver.select(this._model.getTable(), ctx)
+    const rows = await this._select(this._model.getTable(), ctx)
     return rows[0]?.[column] ?? null
   }
 

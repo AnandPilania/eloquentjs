@@ -161,6 +161,28 @@ const file = generateTypeScriptFile(schemas, { header: true })
 // → includes PaginationMeta, PaginatedResult<T>, all model interfaces
 ```
 
+#### Tying types to the query builder
+
+`generateTypeScriptTypes`/`generateTypeScriptFile` produce standalone interfaces — useful, but disconnected from the actual `Model` class you `import`. `generateModelAugmentation` closes that gap with a `declare module` block that merges a model's columns and typed statics directly onto its own file, via TypeScript declaration merging:
+
+```js
+import { generateModelAugmentation } from '@eloquentjs/codegen'
+
+const dts = generateModelAugmentation(schema)
+// declare module './User.js' {
+//   interface User { name: string; email: string; ... }
+//   class User extends Model {
+//     static query(): QueryBuilder<typeof User>
+//     static find(id: string): Promise<User | null>
+//     static create(attrs: { name?: string; email?: string; ... }): Promise<User>
+//   }
+// }
+```
+
+Write it as `User.d.ts` beside `User.js` and TypeScript picks it up automatically — no casts, no generics at the call site: `const user = await User.find(1); user.name` and `User.create({...})` are both checked against the live schema.
+
+`renderModelAugmentations({ modelsDir })` (from `@eloquentjs/codegen/render`) writes one of these per model in a directory; the CLI wires it up as `eloquent generate:types --per-model`.
+
 ### OpenAPI 3.0
 
 ```js

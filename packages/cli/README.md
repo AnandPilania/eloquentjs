@@ -142,9 +142,12 @@ eloquent generate:graphql --models=User,Post         # specific models only
 ```bash
 eloquent generate:types                             # all models → src/types/models.d.ts
 eloquent generate:types --out=types/index.d.ts      # custom path
+eloquent generate:types --per-model                 # + a .d.ts beside each model file
 ```
 
 Generated file includes `PaginationMeta`, `PaginatedResult<T>`, and an interface + `CreateInput` + `UpdateInput` for every model.
+
+`--per-model` additionally writes one `<ModelName>.d.ts` next to each model's own source file, declaration-merging its columns and typed `query()`/`find()`/`create()` directly onto the class — so `user.name` and `User.create({...})` are checked against the live schema with no manual typing. See [@eloquentjs/codegen](../codegen/README.md#tying-types-to-the-query-builder).
 
 **`generate:openapi` options:**
 

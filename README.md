@@ -12,7 +12,7 @@ const users = await User
   .paginate(1, 20)
 ```
 
-[![Tests](https://img.shields.io/badge/tests-1146%20passing-brightgreen)](#)
+[![Tests](https://img.shields.io/badge/tests-1245%20passing-brightgreen)](#)
 [![License](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D20.6.0-brightgreen)](#)
 [![MCP](https://img.shields.io/badge/MCP-compatible-purple)](#)
@@ -35,6 +35,7 @@ const users = await User
 | [`@eloquentjs/api`](./packages/api)             | ![npm](https://img.shields.io/npm/v/@eloquentjs/api)       | One-line REST CRUD routes (Express + Fastify)                             |
 | [`@eloquentjs/mcp`](./packages/mcp)             | ![npm](https://img.shields.io/npm/v/@eloquentjs/mcp)       | MCP server — 21 tools for AI agents (Claude, Cursor, Windsurf)            |
 | [`@eloquentjs/cli`](./packages/cli)             | ![npm](https://img.shields.io/npm/v/@eloquentjs/cli)       | CLI — scaffold, migrate, seed, generate                                   |
+| [`showcase`](./packages/showcase)               | _unpublished_                                               | Real consumer app wiring every package above against sqlite/pgsql/mongodb — integration testbed + perf benchmark, not an npm package |
 
 ---
 
@@ -57,7 +58,7 @@ eloquent migrate
 # Generate GraphQL schema, TypeScript types, and OpenAPI spec
 npm install @eloquentjs/codegen
 eloquent generate:graphql
-eloquent generate:types
+eloquent generate:types --per-model   # + a .d.ts beside each model, typed to its schema
 eloquent generate:openapi
 
 # Add MCP server for AI agents (Claude.ai, Cursor, Windsurf)
@@ -107,6 +108,17 @@ await DB.transaction(async () => {
   const user = await User.create({ name: 'Alice' })
   await user.profile().create({ bio: 'Hello' })
 })   // a throw here rolls all of it back
+
+// Query-result caching — Laravel's remember(), in-memory + TTL
+await User.where('active', true).remember(60).get()
+DB.flushQueryCache()
+
+// Query logging + connection-pool metrics
+DB.listen(({ sql, ms, connection }) => logger.debug(sql, ms))
+DB.poolStats()   // { total, idle, waiting } — pgsql/mysql
+
+// Prevent accidental N+1s — throws if a relation wasn't eager-loaded
+Model.preventLazyLoading()
 
 // Global mass-assignment bypass
 Model.unguard()
@@ -158,6 +170,12 @@ await user.roles().attach(roleId, { assigned_at: new Date() })
 await user.roles().sync([1, 2, 3])
 const roles = await user.roles().withPivot('assigned_at').get()
 roles[0].pivot.assigned_at
+
+// Custom pivot model — casts/accessors on pivot data, not just a plain object
+class Membership extends Model {
+  static casts = { assigned_at: 'date' }
+}
+roles()  { return this.belongsToMany(Role, 'user_roles').using(Membership) }
 
 // Polymorphic — register aliases so a class rename can't orphan existing rows
 import { ModelRegistry } from '@eloquentjs/core'
@@ -290,9 +308,10 @@ eloquentjs/
 │   ├── graphql/       @eloquentjs/graphql
 │   ├── api/           @eloquentjs/api
 │   ├── mcp/           @eloquentjs/mcp
-│   └── cli/           @eloquentjs/cli
+│   ├── cli/           @eloquentjs/cli
+│   └── showcase/      Real consumer app — every package, all 3 drivers (see below)
 ├── tests/
-│   └── unit/          1146 tests, 22 suites, all passing
+│   └── unit/          1245 tests, 27 suites, all passing
 ├── agent-files/       CLAUDE.md, .cursorrules, skills/...
 ├── .github/
 │   └── workflows/     CI + Release automation
@@ -312,7 +331,7 @@ eloquentjs/
 git clone https://github.com/your-org/eloquentjs.git
 cd eloquentjs && npm install
 
-npm test                                           # run all 1146 tests
+npm test                                           # run all 1245 tests
 npm run lint                                       # ESLint, then a per-file parse check
 npm run lint:fix                                   # auto-fix what ESLint can
 npm run typecheck                                  # tsc: JSDoc -> .d.ts, fails on type errors
@@ -336,8 +355,8 @@ npm run release:alpha    # 1.0.0 → 1.0.1-alpha.0
 npm run release:beta     # 1.0.0 → 1.0.1-beta.0
 npm run release:rc       # 1.0.0 → 1.0.1-rc.0
 npm run release:next     # 1.0.0 → 1.0.1-next.0
-npm run check:versions   # verify all 12 manifests agree
-npm run publish:all      # publish all 11 packages to npm
+npm run check:versions   # verify all 13 manifests agree (root + 12 packages)
+npm run publish:all      # publish all 12 packages to npm
 ```
 
 ---

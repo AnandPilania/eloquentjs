@@ -8,7 +8,8 @@
     "demo:sqlite": "node src/demo.js sqlite",
     "demo:pgsql": "node src/demo.js pgsql",
     "demo:mongodb": "node src/demo.js mongodb",
-    "demo:all": "node src/run-all.js"
+    "demo:all": "node src/run-all.js",
+    "benchmark": "node src/benchmark.js"
   },
   "dependencies": {
     "@eloquentjs/core": ">=0.0.8 <0.1.0",
