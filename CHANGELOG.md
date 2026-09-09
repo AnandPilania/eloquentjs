@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.3] — 2026-09-09
+
+### ✨ Features
+
+- add benchmarking (`e585026`)
+
+
+---
+
 ## [0.2.2] — 2026-09-08
 
 ### 🐛 Bug Fixes
