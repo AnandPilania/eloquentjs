@@ -72,6 +72,7 @@ function raw(obj) { return obj[SELF] ?? obj }
  * are required; everything marked optional below is guarded at the call site and
  * raises a clear error naming the driver when absent.
  *
+ /**
  * @typedef {Object} ModelResolver
  * @property {(table: string, ctx: any) => Promise<Record<string, any>[]>} select
  * @property {(table: string, data: Record<string, any>) => Promise<Record<string, any> & {insertedId?: any}>} insert
@@ -97,6 +98,7 @@ function raw(obj) { return obj[SELF] ?? obj }
  * @property {(table: string, column: string) => Promise<boolean>} [hasColumn]
  * @property {(table: string) => Promise<string[]>} [getColumnListing]
  * @property {(fn: (tx: ModelResolver) => Promise<any>) => Promise<any>} [transaction]
+ * @property {() => ({total: number, idle: number, waiting: number} | null)} [poolStats]
  */
 
 // ─── Attribute ───────────────────────────────────────────────────────────────
